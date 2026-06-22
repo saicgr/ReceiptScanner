@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+ios/
+android/
+
+# Metro
+.metro-health-check*
+
+# Debug / logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# macOS
+.DS_Store
+
+# Env / secrets
+.env
+.env.local
+server/.env
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Test
+coverage/
+
+# Downloaded E2E/gauntlet receipt corpus (auto-fetched by server/scripts/fixtures.js)
+server/fixtures/
+
+# Throwaway dev screenshots + Playwright artifacts (root-level only; assets/ kept)
+/*.png
+.playwright-mcp/

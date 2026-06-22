@@ -1,0 +1,22 @@
+{
+  "name": "receiptsnap-proxy",
+  "version": "2.0.0",
+  "description": "Thin Express proxy for ReceiptSnap: holds the Gemini key, exposes POST /extract and an inbound-email webhook. Stateless except an in-memory per-device rate-limit counter.",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test:extract": "node scripts/test-extract.js",
+    "test:gauntlet": "node scripts/test-gauntlet.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "jimp": "^0.22.12",
+    "multer": "^2.1.1"
+  }
+}

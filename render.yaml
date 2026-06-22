@@ -1,0 +1,39 @@
+# Render Blueprint — one-click deploy of the ReceiptSnap proxy (server/).
+#
+# This provisions a FREE web service that runs the thin Express proxy holding
+# your Gemini key and exposing POST /extract (+ the inbound-email webhook).
+#
+# Deploy:
+#   1. Push this repo to GitHub (the proxy lives in server/).
+#   2. render.com → New → Blueprint → pick this repo → Apply.
+#   3. When prompted, paste your GEMINI_API_KEY (the only required secret).
+#   4. Copy the service URL Render gives you (e.g. https://receiptsnap-proxy.onrender.com)
+#      into app.json → expo.extra.extractApiBaseUrl, then rebuild the app.
+#
+# Notes:
+#   - Free plan sleeps after ~15 min idle; the first request then takes ~50s to
+#     wake. Fine for personal use; the app already falls back gracefully.
+#   - DEVICE_TOKEN_SECRET / INBOUND_EMAIL_SECRET are generated for you.
+#   - Email forwarding additionally needs a domain + an inbound-email provider
+#     (e.g. SendGrid Inbound Parse) pointed at POST /inbound-email — optional.
+services:
+  - type: web
+    name: receiptsnap-proxy
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false # paste in the Render dashboard — never committed
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash-lite # override in the dashboard if you prefer another
+      - key: NODE_ENV
+        value: production
+      - key: DEVICE_TOKEN_SECRET
+        generateValue: true
+      - key: INBOUND_EMAIL_SECRET
+        generateValue: true

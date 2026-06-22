@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ReceiptSnap — VAULT redesign (dark)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,900&family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#0A0F0D; --paper2:#0B1310; --card:#141E19; --card2:#172420;
+    --ink:#ECE7D9; --ink-soft:#9DAAA1; --ink-faint:#6C7A72;
+    --line:#26322C;
+    --em-deep:#072A20; --em:#16A085; --em-bright:#2BC6A6; --em-tint:#10312A;
+    --gold:#D8B25A; --gold-bright:#EBCB7E; --gold-tint:#2E2613;
+    --danger:#E0705F;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
+    --shadow-md:0 2px 6px rgba(0,0,0,.4), 0 24px 50px -16px rgba(0,0,0,.6);
+    --shadow-lg:0 40px 90px -24px rgba(0,0,0,.8);
+    --display:'Fraunces', Georgia, serif;
+    --sans:'Hanken Grotesk', system-ui, sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:var(--sans); color:var(--ink);
+    background:
+      radial-gradient(1100px 700px at 10% -10%, #11241D 0%, rgba(17,36,29,0) 55%),
+      radial-gradient(1000px 800px at 100% 0%, #1A1B12 0%, rgba(26,27,18,0) 50%),
+      #070B09;
+    min-height:100%;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    padding:64px 24px 96px;
+  }
+  .wrap{max-width:1180px; margin:0 auto;}
+  .masthead{display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:48px; flex-wrap:wrap;}
+  .masthead .kicker{font-size:12px; letter-spacing:.32em; text-transform:uppercase; color:var(--gold); font-weight:700; margin-bottom:14px;}
+  .masthead h1{font-family:var(--display); font-weight:600; font-size:54px; line-height:.98; letter-spacing:-.02em; color:#F3EEE0;}
+  .masthead h1 em{font-style:italic; color:var(--em-bright);}
+  .masthead p{margin-top:14px; color:var(--ink-soft); font-size:15.5px; max-width:520px; line-height:1.55;}
+  .legend{display:flex; gap:22px; align-items:center; flex-wrap:wrap;}
+  .legend .sw{display:flex; align-items:center; gap:9px; font-size:12.5px; color:var(--ink-soft); font-weight:600;}
+  .legend .dot{width:18px; height:18px; border-radius:6px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);}
+
+  .stage{display:flex; gap:54px; justify-content:center; align-items:flex-start; flex-wrap:wrap;}
+  .phone-label{ text-align:center; margin-top:22px; font-size:12.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-faint); font-weight:700;}
+
+  .phone{
+    width:392px; border-radius:54px; padding:13px;
+    background:linear-gradient(160deg,#1c2722,#070b09);
+    box-shadow:var(--shadow-lg), inset 0 0 0 1px rgba(255,255,255,.04);
+    position:relative;
+  }
+  .screen{position:relative; border-radius:42px; overflow:hidden; background:var(--paper2); height:830px;}
+  .notch{position:absolute; top:12px; left:50%; transform:translateX(-50%); width:120px; height:30px; background:#040705; border-radius:18px; z-index:40;}
+  .statusbar{position:absolute; top:0; left:0; right:0; height:54px; display:flex; align-items:center; justify-content:space-between; padding:0 30px; font-size:14px; font-weight:700; z-index:30; color:#F3EEE2;}
+  .statusbar .dots{display:flex; gap:5px; align-items:center;}
+  .statusbar .bar{width:3px; border-radius:2px; background:currentColor;}
+  .scroll{position:absolute; inset:0; overflow:hidden;}
+
+  /* HERO */
+  .hero{position:relative; padding:64px 24px 30px; color:#F4EEE0; overflow:hidden;
+    background:
+      radial-gradient(120% 120% at 86% 4%, rgba(216,178,90,.45) 0%, rgba(216,178,90,0) 40%),
+      radial-gradient(130% 140% at 4% 0%, rgba(43,198,166,.45) 0%, rgba(43,198,166,0) 44%),
+      linear-gradient(165deg,#0C5747 0%, #07archetype 0%, #062A20 58%, #03130D 100%);
+  }
+  .hero{background:
+      radial-gradient(120% 120% at 86% 4%, rgba(216,178,90,.42) 0%, rgba(216,178,90,0) 40%),
+      radial-gradient(130% 140% at 4% 0%, rgba(43,198,166,.42) 0%, rgba(43,198,166,0) 44%),
+      linear-gradient(165deg,#0C5747 0%, #062A20 58%, #03130D 100%);}
+  .hero::after{content:""; position:absolute; inset:0; opacity:.55; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+  .hero > *{position:relative; z-index:2;}
+  .brandrow{display:flex; align-items:center; justify-content:space-between; margin-bottom:30px;}
+  .wordmark{display:flex; align-items:center; gap:11px;}
+  .seal{width:38px; height:38px; border-radius:12px; background:linear-gradient(150deg,#F3E2B0,#C2954A); display:flex; align-items:center; justify-content:center; box-shadow:0 6px 16px rgba(0,0,0,.4); color:#093D2F;}
+  .wordmark b{font-family:var(--display); font-weight:600; font-size:22px; color:#FBF6EA;}
+  .wordmark span{display:block; font-size:10.5px; letter-spacing:.26em; text-transform:uppercase; color:rgba(244,238,224,.55); font-weight:700; margin-top:1px;}
+  .gear{width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.14); display:flex; align-items:center; justify-content:center; color:#F4EEE0;}
+
+  .ledger-label{font-size:12px; letter-spacing:.24em; text-transform:uppercase; color:rgba(244,238,224,.65); font-weight:700;}
+  .balance{font-family:var(--display); font-weight:500; font-size:62px; line-height:1; letter-spacing:-.02em; margin:12px 0 4px; color:#FCF7EC;}
+  .balance .cents{font-size:34px; color:rgba(252,247,236,.6); vertical-align:super; margin-left:2px;}
+  .balance .cur{font-size:30px; color:rgba(252,247,236,.68); margin-right:6px;}
+  .trend{display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:#08311F; background:linear-gradient(150deg,#F3E2B0,#D8B25A); padding:5px 11px 5px 8px; border-radius:999px;}
+
+  .scanrow{display:flex; gap:12px; margin-top:26px;}
+  .scan{flex:1; border-radius:20px; padding:16px; display:flex; flex-direction:column; gap:14px; cursor:pointer;}
+  .scan.primary{background:linear-gradient(145deg,#F6E7B8,#D9B25C); color:#08311F; box-shadow:0 16px 34px -12px rgba(216,178,90,.55);}
+  .scan.glass{background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14); color:#F4EEE0;}
+  .scan .ic{width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center;}
+  .scan.primary .ic{background:rgba(8,49,31,.12);}
+  .scan.glass .ic{background:rgba(255,255,255,.12);}
+  .scan b{font-size:16px; font-weight:700;}
+  .scan small{display:block; font-size:11.5px; opacity:.72; margin-top:2px; font-weight:500;}
+
+  .body{padding:22px 20px 120px;}
+  .tiles{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:-44px; position:relative; z-index:5;}
+  .tile{background:var(--card); border:1px solid var(--line); border-radius:20px; padding:16px 17px; box-shadow:var(--shadow-md);}
+  .tile .t-k{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); font-weight:700;}
+  .tile .t-v{font-family:var(--display); font-weight:600; font-size:30px; letter-spacing:-.01em; margin-top:7px; color:#F1ECDE;}
+  .tile .t-s{font-size:12px; color:var(--ink-soft); font-weight:600; margin-top:3px;}
+  .up{color:var(--em-bright);} .down{color:var(--danger);}
+
+  .inbox{margin-top:14px; background:linear-gradient(180deg,var(--card2),#101A16); border:1px solid var(--line); border-radius:20px; padding:17px; box-shadow:var(--shadow-sm); position:relative; overflow:hidden;}
+  .inbox::before{content:""; position:absolute; right:-30px; top:-30px; width:120px; height:120px; border-radius:50%; background:radial-gradient(circle,rgba(216,178,90,.22),transparent 70%);}
+  .inbox .row{display:flex; align-items:center; justify-content:space-between; position:relative;}
+  .inbox .k{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); font-weight:700;}
+  .pill-gold{display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--gold-bright); background:var(--gold-tint); padding:5px 10px; border-radius:999px;}
+  .inbox .addr{font-family:var(--display); font-weight:500; font-size:18px; margin:9px 0 13px; color:#EFE9DB;}
+  .inbox .acts{display:flex; gap:9px;}
+  .ghost-btn{display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:700; color:var(--em-bright); background:var(--em-tint); border:none; padding:9px 14px; border-radius:12px; cursor:pointer;}
+
+  .sec{display:flex; align-items:center; justify-content:space-between; margin:26px 2px 12px;}
+  .sec h3{font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-faint); font-weight:800;}
+  .sec a{font-size:13px; font-weight:700; color:var(--em-bright); text-decoration:none; display:flex; align-items:center; gap:4px;}
+
+  .rcpt{display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:18px; padding:13px 15px; margin-bottom:10px; box-shadow:var(--shadow-sm);}
+  .logo{width:46px; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:600; font-size:18px; color:#fff; flex-shrink:0;}
+  .rcpt .m{flex:1; min-width:0;}
+  .rcpt .m b{font-size:15px; font-weight:700; color:#EDE8DA;}
+  .rcpt .m .meta{display:flex; align-items:center; gap:8px; margin-top:4px;}
+  .cat{font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:999px;}
+  .rcpt .m .date{font-size:12px; color:var(--ink-faint); font-weight:600;}
+  .amt{text-align:right; flex-shrink:0;}
+  .amt b{font-family:var(--display); font-weight:600; font-size:19px; color:#F1ECDE; font-variant-numeric:tabular-nums;}
+  .conf{display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:700; margin-top:4px; padding:2px 7px; border-radius:999px;}
+  .conf.hi{color:var(--em-bright); background:var(--em-tint);}
+  .conf.mid{color:var(--gold-bright); background:var(--gold-tint);}
+
+  .nav{position:absolute; left:16px; right:16px; bottom:16px; height:70px; background:rgba(8,16,13,.86); backdrop-filter:blur(18px); border:1px solid rgba(255,255,255,.06); border-radius:24px; display:flex; align-items:center; justify-content:space-around; padding:0 8px; box-shadow:0 18px 44px -14px rgba(0,0,0,.7); z-index:30;}
+  .nav a{display:flex; flex-direction:column; align-items:center; gap:5px; color:rgba(244,238,224,.42); font-size:10px; font-weight:700; text-decoration:none;}
+  .nav a.on{color:#F3E2B0;}
+  .nav a .nb{width:30px; height:30px; display:flex; align-items:center; justify-content:center;}
+  .nav a.on .nb{background:rgba(243,226,176,.14); border-radius:11px;}
+
+  .det-hero{padding:60px 22px 26px; color:#F4EEE0; position:relative; overflow:hidden;
+    background:radial-gradient(120% 130% at 90% 0%, rgba(216,178,90,.32),transparent 44%), linear-gradient(160deg,#0C5747,#03130D);}
+  .det-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:24px;}
+  .circ{width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.16); display:flex; align-items:center; justify-content:center; color:#F4EEE0;}
+  .det-merchant{font-family:var(--display); font-weight:600; font-size:30px; letter-spacing:-.02em;}
+  .det-sub{color:rgba(244,238,224,.68); font-size:13.5px; font-weight:600; margin-top:6px; display:flex; gap:10px; align-items:center;}
+  .det-total{font-family:var(--display); font-weight:500; font-size:50px; letter-spacing:-.02em; margin-top:18px; color:#FCF7EC;}
+  .det-total .cur{font-size:26px; opacity:.7; margin-right:5px;}
+  .det-body{padding:20px;}
+  .field{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:13px 15px; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; box-shadow:var(--shadow-sm);}
+  .field .fk{font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); font-weight:700;}
+  .field .fv{font-size:15.5px; font-weight:700; margin-top:4px; color:#EDE8DA;}
+  .field .edit{color:var(--ink-faint);}
+  .li-head{display:flex; align-items:center; justify-content:space-between; margin:22px 2px 12px;}
+  .li-head h3{font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-faint); font-weight:800;}
+  .li{display:flex; align-items:center; gap:12px; padding:12px 4px; border-bottom:1px solid var(--line);}
+  .li .qty{width:30px; height:30px; border-radius:9px; background:var(--em-tint); color:var(--em-bright); font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center;}
+  .li .ln{flex:1; font-size:14.5px; font-weight:600; color:#E3DED0;}
+  .li .lp{font-family:var(--display); font-weight:600; font-size:15px; color:#EDE8DA; font-variant-numeric:tabular-nums;}
+  .sumcard{margin-top:14px; background:linear-gradient(180deg,#0C5747,#062A20); border:1px solid rgba(255,255,255,.06); border-radius:18px; padding:16px 18px; color:#F4EEE0; box-shadow:var(--shadow-md);}
+  .sumcard .sr{display:flex; justify-content:space-between; align-items:center; padding:5px 0; font-size:14px; font-weight:600; color:rgba(244,238,224,.8);}
+  .sumcard .sr.tot{border-top:1px solid rgba(255,255,255,.16); margin-top:6px; padding-top:11px;}
+  .sumcard .sr.tot b{font-family:var(--display); font-weight:600; font-size:22px; color:#FCF7EC;}
+  svg{display:block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <div>
+      <div class="kicker">Concept · ReceiptSnap · Dark</div>
+      <h1>The <em>Vault</em> — after dark</h1>
+      <p>The same private-bank language at night: near-black forest canvas, glowing emerald, warm gold. Cards lift with depth instead of lines; numerals stay in Fraunces.</p>
+    </div>
+    <div class="legend">
+      <div class="sw"><span class="dot" style="background:#03130D"></span>Forest black</div>
+      <div class="sw"><span class="dot" style="background:#2BC6A6"></span>Emerald glow</div>
+      <div class="sw"><span class="dot" style="background:#D8B25A"></span>Champagne</div>
+      <div class="sw"><span class="dot" style="background:#ECE7D9"></span>Cream</div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <!-- HOME -->
+    <div>
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span>
+          <span class="dots"><span class="bar" style="height:7px"></span><span class="bar" style="height:10px"></span><span class="bar" style="height:13px"></span><span class="bar" style="height:16px"></span>
+            <svg width="20" height="14" viewBox="0 0 24 24" fill="none" style="margin-left:4px"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span style="margin-left:4px; width:24px; height:12px; border:2px solid currentColor; border-radius:4px; display:inline-block; position:relative;"><span style="position:absolute; inset:2px; right:7px; background:currentColor; border-radius:1px;"></span></span>
+          </span>
+        </div>
+        <div class="scroll">
+          <div class="hero">
+            <div class="brandrow">
+              <div class="wordmark">
+                <div class="seal"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 8h6M9 11.5h6M9 15h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+                <div><b>ReceiptSnap</b><span>Vault</span></div>
+              </div>
+              <div class="gear"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4 5.3 5.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+            </div>
+            <div class="ledger-label">This month · June <span style="opacity:.5">— 23 receipts</span></div>
+            <div class="balance"><span class="cur">$</span>2,418<span class="cents">.60</span></div>
+            <span class="trend"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 14l6-6 4 4 6-7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 5h4v4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 12% vs. May · tracking well</span>
+            <div class="scanrow">
+              <div class="scan primary">
+                <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+                <div><b>Quick Scan</b><small>One receipt, instant capture</small></div>
+              </div>
+              <div class="scan glass">
+                <div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="8" y="3" width="13" height="13" rx="2.4" stroke="currentColor" stroke-width="1.9"/><path d="M16 19v.5A1.5 1.5 0 0 1 14.5 21h-9A2.5 2.5 0 0 1 3 18.5v-9A1.5 1.5 0 0 1 4.5 8H5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></div>
+                <div><b>Multi Scan</b><small>Batch &amp; long receipts</small></div>
+              </div>
+            </div>
+          </div>
+          <div class="body">
+            <div class="tiles">
+              <div class="tile"><div class="t-k">Receipts</div><div class="t-v">23</div><div class="t-s up">+5 this week</div></div>
+              <div class="tile"><div class="t-k">Avg / receipt</div><div class="t-v">$105</div><div class="t-s"><span class="down">▼ 4%</span> vs. May</div></div>
+            </div>
+            <div class="inbox">
+              <div class="row"><span class="k">Forward e-receipts to</span><span class="pill-gold"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" stroke-width="1.9"/><path d="M4 7l8 6 8-6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg> Email-in</span></div>
+              <div class="addr">user-82558a54b2@inbox.receiptsnap.app</div>
+              <div class="acts">
+                <button class="ghost-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.9"/><path d="M5 15V5a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg> Copy address</button>
+                <button class="ghost-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg> Check inbox</button>
+              </div>
+            </div>
+            <div class="sec"><h3>Recent receipts</h3><a href="#">View all <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a></div>
+            <div class="rcpt"><div class="logo" style="background:linear-gradient(150deg,#1FA98A,#0C6B53)">WF</div><div class="m"><b>Whole Foods Market</b><div class="meta"><span class="cat" style="color:#5FD9BE;background:var(--em-tint)">Groceries</span><span class="date">Jun 18</span></div></div><div class="amt"><b>$84.20</b><div class="conf hi"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>High</div></div></div>
+            <div class="rcpt"><div class="logo" style="background:linear-gradient(150deg,#D8B25A,#B0863A)">UB</div><div class="m"><b>Uber · Airport ride</b><div class="meta"><span class="cat" style="color:#EBCB7E;background:var(--gold-tint)">Travel</span><span class="date">Jun 17</span></div></div><div class="amt"><b>$32.50</b><div class="conf mid"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/></svg>Check date</div></div></div>
+            <div class="rcpt"><div class="logo" style="background:linear-gradient(150deg,#3B6FB0,#274E84)">AP</div><div class="m"><b>Apple Store</b><div class="meta"><span class="cat" style="color:#8FB4E6;background:#16243A">Equipment</span><span class="date">Jun 15</span></div></div><div class="amt"><b>$1,299.00</b><div class="conf hi"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>High</div></div></div>
+          </div>
+          <div class="nav">
+            <a class="on"><span class="nb"><svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M3 11l9-8 9 8M5 9.5V20h5v-6h4v6h5V9.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Home</a>
+            <a><span class="nb"><svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M5 4h11l3 3v13H5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9h8M8 13h8M8 17h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>History</a>
+            <a><span class="nb"><svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M5 20V10M12 20V4M19 20v-7" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg></span>Stats</a>
+            <a><span class="nb"><svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 5-3.5 7.5-7 9-3.5-1.5-7-4-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>Protections</a>
+            <a><span class="nb"><svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M5 13l1.5-4.5A2 2 0 0 1 8.4 7h7.2a2 2 0 0 1 1.9 1.5L19 13M5 13h14v4H5zM7.5 17v1.5M16.5 17v1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Mileage</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="phone-label">Home · the ledger</div>
+    </div>
+
+    <!-- RECEIPT -->
+    <div>
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="statusbar"><span>9:41</span><span class="dots"><span class="bar" style="height:7px"></span><span class="bar" style="height:10px"></span><span class="bar" style="height:13px"></span><span class="bar" style="height:16px"></span></span></div>
+        <div class="scroll">
+          <div class="det-hero">
+            <div class="det-top">
+              <div class="circ"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              <div style="display:flex; gap:10px;">
+                <div class="circ"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div class="circ"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              </div>
+            </div>
+            <div class="det-merchant">Whole Foods Market</div>
+            <div class="det-sub"><span>Jun 18, 2026</span> · <span class="pill-gold">High confidence</span></div>
+            <div class="det-total"><span class="cur">$</span>84.20</div>
+          </div>
+          <div class="det-body">
+            <div class="field"><div><div class="fk">Category</div><div class="fv">🥬 Groceries</div></div><span class="edit"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20h4L18 10l-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span></div>
+            <div style="display:flex; gap:10px;">
+              <div class="field" style="flex:1"><div><div class="fk">Payment</div><div class="fv">•••• Visa</div></div></div>
+              <div class="field" style="flex:1"><div><div class="fk">Tax</div><div class="fv">$6.10</div></div></div>
+            </div>
+            <div class="li-head"><h3>Line items · 5</h3><span style="font-size:12px;color:var(--ink-faint);font-weight:700">edit · delete</span></div>
+            <div class="li"><span class="qty">2×</span><span class="ln">Organic bananas</span><span class="lp">$3.40</span></div>
+            <div class="li"><span class="qty">1×</span><span class="ln">Almond milk</span><span class="lp">$4.99</span></div>
+            <div class="li"><span class="qty">1×</span><span class="ln">Sourdough loaf</span><span class="lp">$6.50</span></div>
+            <div class="li"><span class="qty">3×</span><span class="ln">Greek yogurt</span><span class="lp">$11.97</span></div>
+            <div class="li"><span class="qty">1×</span><span class="ln">Cold brew · 32oz</span><span class="lp">$51.24</span></div>
+            <div class="sumcard">
+              <div class="sr"><span>Subtotal</span><span style="font-variant-numeric:tabular-nums">$78.10</span></div>
+              <div class="sr"><span>Tax</span><span style="font-variant-numeric:tabular-nums">$6.10</span></div>
+              <div class="sr tot"><span>Total</span><b>$84.20</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="phone-label">Receipt · fully editable</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
