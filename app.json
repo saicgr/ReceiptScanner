@@ -91,7 +91,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "extractApiBaseUrl": "https://receiptsnap-proxy.onrender.com",
+      "extractApiBaseUrl": "https://receiptscanner-ind3.onrender.com",
       "googleOAuthClientIdIos": "REPLACE_WITH_IOS_CLIENT_ID",
       "googleOAuthClientIdAndroid": "REPLACE_WITH_ANDROID_CLIENT_ID",
       "googleOAuthClientIdWeb": "REPLACE_WITH_WEB_CLIENT_ID",
