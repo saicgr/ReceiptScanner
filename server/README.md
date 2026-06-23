@@ -103,6 +103,48 @@ Authed. Deterministic per device. Returns:
 ### `GET /limits`  — rate-limit status (no consume)
 Authed. → `{ "remainingToday": 50, "lifetimeRemaining": 5000 }`.
 
+### `GET /roadmap`  — curated roadmap + live votes
+Authed. → `{ "updatedAt": "2026-06-22", "items": [{ "id", "title", "description", "status", "category", "upvotes", "voted" }] }`. Items are curated in `src/roadmapData.js`; `upvotes`/`voted` come from Supabase. When Supabase is unconfigured/down the items still return with `upvotes: 0, voted: false`.
+
+### `POST /roadmap/:id/vote`  — toggle an upvote
+Authed. Body: none. Toggles this device's vote on a votable (`planned`/`in_progress`) item. → `{ "id", "voted": true, "upvotes": 3 }`. `404` for an unknown id, `400` for a `shipped` item, `503` when storage is unavailable.
+
+### `POST /feature-requests`  — submit a private request
+Authed. Body: `{ "title": "…", "description": "…", "category": "…"? }`. Stored privately in Supabase (not shown to other users). → `{ "ok": true, "id": "uuid" }`. `400` on validation (title 1–120, description ≤2000), `429` past `FEATURE_REQUESTS_PER_DAY`, `503` when storage is unavailable.
+
+---
+
+## Roadmap & feature-request storage (Supabase — optional)
+
+These three routes are the **only** persistent storage. They hold roadmap upvotes and private feature-request text — never receipts; devices are stored as a `sha256` hash. The feature degrades gracefully: without `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `GET /roadmap` still serves the curated list at zero votes and the write routes return `503`.
+
+To enable: create a free [Supabase](https://supabase.com) project, run this in the SQL editor, then set the two env vars (use the **service-role** key — it bypasses RLS, so keep it server-only):
+
+```sql
+create table feature_requests (
+  id uuid primary key default gen_random_uuid(),
+  device_hash text not null,
+  title text not null,
+  description text not null default '',
+  category text,
+  status text not null default 'open',
+  created_at timestamptz not null default now()
+);
+create index on feature_requests (created_at desc);
+
+create table roadmap_votes (
+  item_id text not null,
+  device_hash text not null,
+  created_at timestamptz not null default now(),
+  primary key (item_id, device_hash)
+);
+create index on roadmap_votes (item_id);
+
+-- Lock out anon/public; the proxy's service-role key bypasses RLS.
+alter table feature_requests enable row level security;
+alter table roadmap_votes  enable row level security;
+```
+
 ---
 
 ## Environment variables
@@ -121,6 +163,9 @@ Copy `.env.example` → `server/.env` (the loader also falls back to the repo-ro
 | `REGISTER_PER_DAY_PER_IP` | no | `10` | Per-IP daily cap on `/device/register` (identity-minting backstop). |
 | `EXTRACT_PER_DAY_PER_IP` | no | `200` | Per-IP daily backstop shared by `/extract` + `/detect-receipts`. |
 | `GLOBAL_DAILY_GEMINI_CAP` | no | `2000` | Billing circuit breaker: total Gemini calls/day across ALL routes (429 once spent). |
+| `FEATURE_REQUESTS_PER_DAY` | no | `10` | Anti-spam cap on `/feature-requests` per device per day. |
+| `SUPABASE_URL` | no | _(empty = roadmap votes/submit disabled)_ | Supabase project URL for roadmap/feature-request storage. |
+| `SUPABASE_SERVICE_ROLE_KEY` | no | _(empty)_ | Supabase **service-role** key (bypasses RLS). Server-only — never ship it. |
 | `INBOUND_EMAIL_SECRET` | **yes in production** | _(empty = open in dev, **503 in production**)_ | Shared secret the mail webhook must present (`X-Inbound-Secret` header preferred; `?secret=` only for providers that can't set headers). Generate with `openssl rand -hex 32`. |
 | `FORWARDING_DOMAIN` | no | `inbox.receiptsnap.app` | Domain in minted addresses: `user-<token>@<FORWARDING_DOMAIN>`. |
 | `PENDING_TTL_MS` | no | `259200000` (72 h) | How long un-acked email receipts live in the in-memory queue. |

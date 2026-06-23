@@ -37,3 +37,10 @@ services:
         generateValue: true
       - key: INBOUND_EMAIL_SECRET
         generateValue: true
+      # Roadmap & feature-request storage (optional). Create a free Supabase
+      # project, run the migration in server/README.md, then paste these. Unset =
+      # the roadmap still shows (zero votes) but voting/submitting return 503.
+      - key: SUPABASE_URL
+        sync: false # paste in the Render dashboard
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false # service-role key — bypasses RLS; server-only, never shipped

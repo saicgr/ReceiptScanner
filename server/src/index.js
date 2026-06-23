@@ -9,6 +9,9 @@
 //   POST /inbound-email          mail-provider webhook (forwarding feature)
 //   GET  /pending                app pulls email-ingested receipts
 //   POST /pending/ack            app acknowledges, clearing them from the queue
+//   GET  /roadmap                curated roadmap + live upvote counts + my votes
+//   POST /roadmap/:id/vote       toggle my upvote on a roadmap item
+//   POST /feature-requests       submit a private feature request (rate-limited)
 //
 // Auth: every endpoint that costs money or exposes user data requires a valid
 // X-Device-Id + X-Device-Token pair (see deviceAuth.js). No CORS middleware —
@@ -29,9 +32,18 @@ import {
   ipCheckAndConsume,
   globalCheckAndConsume,
   globalRefund,
+  deviceActionCheckAndConsume,
 } from './rateLimit.js';
 import { handleInboundEmail, verifyInboundSecret } from './inboundEmail.js';
 import { list as listPending, ack as ackPending } from './pendingStore.js';
+import { ROADMAP_ITEMS, ROADMAP_BY_ID, UPDATED_AT as ROADMAP_UPDATED_AT } from './roadmapData.js';
+import {
+  hashDevice,
+  getVoteCounts,
+  getDeviceVotes,
+  toggleVote,
+  insertFeatureRequest,
+} from './featureStore.js';
 
 const app = express();
 // Render terminates TLS at a proxy; trust one hop so req.ip is the client.
@@ -291,6 +303,102 @@ app.post('/pending/ack', jsonSmall, requireDeviceAuth, (req, res) => {
   }
   const removed = ackPending(forwardingToken(req.deviceId), ids);
   res.json({ ok: true, removed });
+});
+
+// ---------------------------------------------------------------------------
+// Roadmap & feature requests (durable storage in Supabase; see featureStore.js)
+//
+//   GET  /roadmap              curated items + live upvote counts + my votes
+//   POST /roadmap/:id/vote     toggle my upvote on a votable item
+//   POST /feature-requests     submit a private feature request (rate-limited)
+//
+// All authed. Vote reads degrade gracefully (counts 0) when storage is down;
+// writes return 503 so the app can show "voting is temporarily unavailable".
+// ---------------------------------------------------------------------------
+app.get('/roadmap', requireDeviceAuth, async (req, res) => {
+  const deviceHash = hashDevice(req.deviceId);
+  // Both reads degrade to empty on storage failure — the curated list still ships.
+  const [counts, myVotes] = await Promise.all([getVoteCounts(), getDeviceVotes(deviceHash)]);
+  const items = ROADMAP_ITEMS.map((it) => ({
+    ...it,
+    upvotes: counts[it.id] ?? 0,
+    voted: myVotes.has(it.id),
+  }));
+  res.json({ updatedAt: ROADMAP_UPDATED_AT, items });
+});
+
+app.post('/roadmap/:id/vote', jsonSmall, requireDeviceAuth, async (req, res) => {
+  const item = ROADMAP_BY_ID.get(req.params.id);
+  if (!item) {
+    return res.status(404).json({ error: 'not_found', message: 'Unknown roadmap item.' });
+  }
+  if (item.status === 'shipped') {
+    return res
+      .status(400)
+      .json({ error: 'bad_request', message: 'Shipped items cannot be voted on.' });
+  }
+  try {
+    const { voted, count } = await toggleVote(item.id, hashDevice(req.deviceId));
+    res.json({ id: item.id, voted, upvotes: count });
+  } catch (err) {
+    console.error('[roadmap vote] error:', err.message);
+    const status = err.status || 500;
+    res.status(status).json({
+      error: err.code || 'vote_failed',
+      message:
+        status === 503
+          ? 'Voting is temporarily unavailable. Please try again later.'
+          : err.message,
+    });
+  }
+});
+
+app.post('/feature-requests', jsonSmall, requireDeviceAuth, async (req, res) => {
+  // Validate BEFORE consuming the per-device daily bucket.
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  const description =
+    typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+  const rawCategory = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+  if (title.length < 1 || title.length > 120) {
+    return res
+      .status(400)
+      .json({ error: 'bad_request', message: 'Provide a title (1–120 characters).' });
+  }
+  if (description.length > 2000) {
+    return res
+      .status(400)
+      .json({ error: 'bad_request', message: 'Description must be 2000 characters or fewer.' });
+  }
+  const category = rawCategory ? rawCategory.slice(0, 60) : null;
+
+  const limit = deviceActionCheckAndConsume(
+    req.deviceId,
+    'feature_request',
+    config.rateLimit.featureRequestsPerDay,
+  );
+  if (!limit.ok) {
+    return res.status(limit.status).json({ error: limit.reason, message: limit.message });
+  }
+
+  try {
+    const { id } = await insertFeatureRequest({
+      deviceHash: hashDevice(req.deviceId),
+      title,
+      description,
+      category,
+    });
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('[feature-requests] error:', err.message);
+    const status = err.status || 500;
+    res.status(status).json({
+      error: err.code || 'submit_failed',
+      message:
+        status === 503
+          ? 'Feature requests are temporarily unavailable. Please try again later.'
+          : err.message,
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,18 @@ export const config = {
     extractPerDayPerIp: parseInt(process.env.EXTRACT_PER_DAY_PER_IP || '200', 10),
     // Billing circuit breaker: total Gemini calls/day across ALL routes.
     globalDailyGeminiCap: parseInt(process.env.GLOBAL_DAILY_GEMINI_CAP || '2000', 10),
+    // Feature-request submissions per device per day (no Gemini cost; just an
+    // anti-spam backstop on the durable store).
+    featureRequestsPerDay: parseInt(process.env.FEATURE_REQUESTS_PER_DAY || '10', 10),
+  },
+
+  // Supabase — durable storage for the Roadmap & Feature-Request feature (the
+  // ONLY persistent storage). Optional: when unset, those endpoints degrade
+  // (GET /roadmap returns curated items at zero votes; writes return 503).
+  // Uses the SERVICE ROLE key, which bypasses RLS — server-only, never shipped.
+  supabase: {
+    url: process.env.SUPABASE_URL || '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   },
 
   // Inbound email: shared secret so only your mail provider's webhook can post.

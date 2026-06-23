@@ -22,6 +22,9 @@ const counters = new Map();
 /** "route:ip" -> { day, count } — small per-IP backstop counters. */
 const ipCounters = new Map();
 
+/** "action:deviceId" -> { day, count } — generic per-device daily buckets. */
+const deviceActionCounters = new Map();
+
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -141,6 +144,38 @@ export function ipCheckAndConsume(ip, route, perDay) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-device generic action bucket (non-Gemini features, e.g. feature requests)
+// ---------------------------------------------------------------------------
+
+/**
+ * Consume one call from a per-device daily bucket namespaced by `action`
+ * (e.g. 'feature_request'). Same daily-reset + eviction discipline as the other
+ * counters. Use for cheap, non-billed actions that still want an anti-spam cap.
+ */
+export function deviceActionCheckAndConsume(deviceId, action, perDay) {
+  if (!deviceId) {
+    return { ok: false, reason: 'missing_device_id', status: 400 };
+  }
+  const key = `${action}:${deviceId}`;
+  const d = today();
+  let c = deviceActionCounters.get(key);
+  if (!c || c.day !== d) {
+    c = { day: d, count: 0 };
+    boundedSet(deviceActionCounters, key, c);
+  }
+  if (c.count >= perDay) {
+    return {
+      ok: false,
+      reason: 'daily_cap',
+      status: 429,
+      message: `Daily limit (${perDay}) reached for this action. Try again tomorrow.`,
+    };
+  }
+  c.count += 1;
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // Global daily Gemini cap (billing circuit breaker)
 // ---------------------------------------------------------------------------
 
@@ -173,5 +208,6 @@ export function globalRefund() {
 export function _reset() {
   counters.clear();
   ipCounters.clear();
+  deviceActionCounters.clear();
   globalCounter = { day: today(), count: 0 };
 }
