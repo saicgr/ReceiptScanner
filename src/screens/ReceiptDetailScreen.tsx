@@ -7,7 +7,7 @@
  * hydrates the draft and jumps to Review. All data/actions are unchanged.
  */
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, View, ScrollView, Text as RNText } from 'react-native';
+import { Alert, Linking, Pressable, View, ScrollView, Text as RNText } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, Stack } from 'expo-router';
@@ -33,16 +33,23 @@ import { useSettings } from '@/store/settings';
 import { useLookups } from '@/store/lookups';
 import { useDraft } from '@/store/draft';
 import { FolderPickerSheet } from '@/components/FolderPickerSheet';
+import { AddProtectionSheet, type ProtectionKind } from '@/components/AddProtectionSheet';
 import * as DB from '@/db';
 import { decodeSnapshot } from '@/db/revisions';
 import { deleteReceiptCascade, revertToSnapshot } from '@/services/receiptService';
+import { shareWarrantyClaim } from '@/services/warrantyClaimService';
+import { findMatchesForReceipt, dismissMatch } from '@/services/recallService';
+import { cardBenefitHints } from '@/lib/cardBenefits';
 import { formatMoney } from '@/lib/money';
 import { formatDate, relativeDays } from '@/lib/dates';
 import type {
   AuditLogEntry,
   Folder,
+  PriceProtection,
+  Rebate,
   ReceiptRevision,
   ReceiptWithRelations,
+  RecallMatch,
 } from '@/types';
 
 function urgencyColor(iso: string, theme: ReturnType<typeof useTheme>) {
@@ -79,6 +86,10 @@ export default function ReceiptDetailScreen() {
   const [revisions, setRevisions] = useState<ReceiptRevision[]>([]);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [recalls, setRecalls] = useState<RecallMatch[]>([]);
+  const [rebates, setRebates] = useState<Rebate[]>([]);
+  const [priceProtections, setPriceProtections] = useState<PriceProtection[]>([]);
+  const [protectionSheet, setProtectionSheet] = useState<ProtectionKind | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -87,17 +98,25 @@ export default function ReceiptDetailScreen() {
       setLoaded(true);
       return;
     }
-    const [r, fs, revs, log] = await Promise.all([
+    const [r, fs, revs, log, rbs, pps] = await Promise.all([
       DB.getReceipt(id),
       DB.Folders.foldersForReceipt(id),
       DB.Revisions.listRevisions(id),
       DB.Revisions.listAuditLog(id),
+      DB.Rebates.listRebatesForReceipt(id),
+      DB.PriceProtections.listPriceProtectionsForReceipt(id),
     ]);
     setReceipt(r);
     setFolders(fs);
     setRevisions(revs);
     setAuditLog(log);
+    setRebates(rbs);
+    setPriceProtections(pps);
     setLoaded(true);
+    // Recall check is best-effort and reads the local cache only (no fetch here).
+    findMatchesForReceipt(id)
+      .then(setRecalls)
+      .catch(() => setRecalls([]));
   }, [id]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -188,6 +207,36 @@ export default function ReceiptDetailScreen() {
 
   const hasProtections = !!(r.return_deadline || r.warranty_deadline);
 
+  // TASK 77 — credit-card protection hints keyed on the payment method.
+  const benefitHints = cardBenefitHints(payment?.name ?? null);
+
+  // TASK 80 — bundle serial/photo + receipt into a shareable claim packet.
+  const onWarrantyClaim = async () => {
+    setBusy(true);
+    try {
+      await shareWarrantyClaim(r.id);
+    } catch {
+      Alert.alert('Warranty claim', 'Could not prepare the claim packet.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // TASK 78 — dismiss a recall match so it stops surfacing for this receipt.
+  const onDismissRecall = (m: RecallMatch) => {
+    dismissMatch(r.id, m.recall.recall_id)
+      .then(() => setRecalls((prev) => prev.filter((x) => x.recall.recall_id !== m.recall.recall_id)))
+      .catch(() => {});
+  };
+  const onOpenRecall = async (m: RecallMatch) => {
+    if (!m.recall.url) return;
+    try {
+      await Linking.openURL(m.recall.url);
+    } catch {
+      Alert.alert('Recall', 'Could not open the recall page.');
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: t.colors.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -257,6 +306,49 @@ export default function ReceiptDetailScreen() {
                 <Chip key={tag.id} label={tag.name} color={tag.color} icon={tag.kind === 'job' ? 'briefcase-outline' : tag.kind === 'trip' ? 'airplane-outline' : 'pricetag-outline'} />
               ))}
             </Row>
+          ) : null}
+
+          {/* TASK 78 — Product recall alerts (best-effort, from local cache). */}
+          {recalls.length > 0 ? (
+            <View style={{ marginTop: t.spacing.xs, marginBottom: t.spacing.sm }}>
+              {recalls.map((m) => (
+                <View
+                  key={m.recall.recall_id}
+                  style={{
+                    backgroundColor: t.colors.dangerTint,
+                    borderRadius: t.radius.md,
+                    borderWidth: 1,
+                    borderColor: t.colors.danger,
+                    padding: t.spacing.md,
+                    marginBottom: t.spacing.sm,
+                  }}
+                >
+                  <Row gap={8} align="center" style={{ marginBottom: 4 }}>
+                    <Ionicons name="warning-outline" size={18} color={t.colors.danger} />
+                    <RNText style={{ color: t.colors.danger, fontFamily: fonts.sansBold, fontSize: 12.5, letterSpacing: 0.4 }}>
+                      POSSIBLE RECALL
+                    </RNText>
+                  </Row>
+                  <RNText style={{ color: t.colors.text, fontFamily: fonts.sansSemibold, fontSize: 14 }}>
+                    {m.recall.title || 'Recalled product'}
+                  </RNText>
+                  {m.recall.hazard ? (
+                    <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12.5, marginTop: 2 }}>
+                      {m.recall.hazard}
+                    </RNText>
+                  ) : null}
+                  <RNText style={{ color: t.colors.textFaint, fontFamily: fonts.sansMedium, fontSize: 11.5, marginTop: 2 }}>
+                    Matched “{m.matchedTerm}”
+                  </RNText>
+                  <Row gap={t.spacing.sm} style={{ marginTop: t.spacing.sm }}>
+                    {m.recall.url ? (
+                      <Button title="View recall" icon="open-outline" variant="danger" size="sm" onPress={() => onOpenRecall(m)} />
+                    ) : null}
+                    <Button title="Dismiss" variant="ghost" size="sm" onPress={() => onDismissRecall(m)} />
+                  </Row>
+                </View>
+              ))}
+            </View>
           ) : null}
 
           {/* Memo. */}
@@ -358,6 +450,91 @@ export default function ReceiptDetailScreen() {
             </>
           ) : null}
 
+          {/* TASK 80 — warranty / return claim packet (serial + photo + receipt). */}
+          {hasProtections ? (
+            <View style={{ marginTop: t.spacing.sm }}>
+              <Button
+                title="Prepare warranty claim"
+                icon="document-attach-outline"
+                variant="secondary"
+                onPress={onWarrantyClaim}
+              />
+            </View>
+          ) : null}
+
+          {/* TASK 77 — credit-card purchase/return/warranty protection hints. */}
+          {benefitHints.length > 0 ? (
+            <>
+              <SectionLabel text={`${payment?.name ?? 'Card'} benefits`} />
+              <FieldCard>
+                {benefitHints.map((h, i) => (
+                  <View key={h.kind} style={{ paddingVertical: 6 }}>
+                    {i > 0 ? <View style={{ height: 1, backgroundColor: t.colors.border, marginBottom: 10 }} /> : null}
+                    <Row gap={10} align="flex-start">
+                      <Ionicons name="card-outline" size={16} color={t.colors.brand} style={{ marginTop: 2 }} />
+                      <View style={{ flex: 1 }}>
+                        <RNText style={{ color: t.colors.text, fontFamily: fonts.sansBold, fontSize: 13.5 }}>{h.title}</RNText>
+                        <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12.5, marginTop: 2, lineHeight: 18 }}>
+                          {h.detail}
+                        </RNText>
+                      </View>
+                    </Row>
+                  </View>
+                ))}
+                <RNText style={{ color: t.colors.textFaint, fontFamily: fonts.sansMedium, fontSize: 11, marginTop: 8 }}>
+                  General guidance — check your card’s benefits guide for exact terms.
+                </RNText>
+              </FieldCard>
+            </>
+          ) : null}
+
+          {/* TASK 81 — mail-in rebates tracked for this receipt. */}
+          <SectionLabel text={rebates.length ? `Rebates · ${rebates.length}` : 'Rebates'} />
+          {rebates.map((rb) => (
+            <FieldCard key={rb.id}>
+              <Row justify="space-between" align="center">
+                <View style={{ flex: 1, paddingRight: t.spacing.sm }}>
+                  <RNText style={{ color: t.colors.text, fontFamily: fonts.sansBold, fontSize: 14 }}>
+                    {rb.description || 'Mail-in rebate'}
+                  </RNText>
+                  <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12.5 }}>
+                    {rb.status}
+                    {rb.submission_deadline ? ` · submit by ${formatDate(rb.submission_deadline, settings.date_format)}` : ''}
+                  </RNText>
+                </View>
+                <RNText style={{ color: t.colors.text, fontFamily: fonts.display, fontSize: 15 }}>
+                  {formatMoney(rb.amount, rb.currency)}
+                </RNText>
+              </Row>
+            </FieldCard>
+          ))}
+          <Chip label="Add rebate" icon="add" onPress={() => setProtectionSheet('rebate')} />
+
+          {/* TASK 79 — price-drop / price-protection claims for this receipt. */}
+          <SectionLabel text={priceProtections.length ? `Price protection · ${priceProtections.length}` : 'Price protection'} />
+          {priceProtections.map((pp) => {
+            const refund = Math.max(0, pp.original_price - pp.current_price);
+            return (
+              <FieldCard key={pp.id}>
+                <Row justify="space-between" align="center">
+                  <View style={{ flex: 1, paddingRight: t.spacing.sm }}>
+                    <RNText style={{ color: t.colors.text, fontFamily: fonts.sansBold, fontSize: 14 }}>
+                      {pp.item_name || 'Price drop'}
+                    </RNText>
+                    <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12.5 }}>
+                      {pp.status}
+                      {pp.claim_deadline ? ` · claim by ${formatDate(pp.claim_deadline, settings.date_format)}` : ''}
+                    </RNText>
+                  </View>
+                  <RNText style={{ color: t.colors.success, fontFamily: fonts.display, fontSize: 15 }}>
+                    {formatMoney(refund, pp.currency)}
+                  </RNText>
+                </Row>
+              </FieldCard>
+            );
+          })}
+          <Chip label="Add price drop" icon="add" onPress={() => setProtectionSheet('price_protection')} />
+
           {/* Folders — many-to-many labels (never duplicates the receipt). */}
           <SectionLabel text={folders.length ? `Folders · ${folders.length}` : 'Folders'} />
           <Row gap={t.spacing.sm} wrap align="center">
@@ -425,6 +602,23 @@ export default function ReceiptDetailScreen() {
         onConfirm={onSetFolders}
         onClose={() => setFolderPickerOpen(false)}
       />
+
+      {protectionSheet ? (
+        <AddProtectionSheet
+          visible
+          kind={protectionSheet}
+          receiptId={r.id}
+          vendor={r.vendor}
+          currency={r.currency}
+          paidAmount={r.total}
+          dateFormat={settings.date_format}
+          onClose={() => setProtectionSheet(null)}
+          onSaved={() => {
+            setProtectionSheet(null);
+            load();
+          }}
+        />
+      ) : null}
 
       <LoadingOverlay visible={busy} message="Working…" />
     </View>

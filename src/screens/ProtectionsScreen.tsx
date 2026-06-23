@@ -4,7 +4,7 @@
  * and item-level deadlines by protectionsService.
  */
 import { useCallback, useState } from 'react';
-import { View } from 'react-native';
+import { Alert, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
   Screen,
@@ -12,6 +12,7 @@ import {
   Text,
   Row,
   Badge,
+  Button,
   SectionHeader,
   ListRow,
   EmptyState,
@@ -19,8 +20,13 @@ import {
 } from '@/components/ui';
 import { useSettings } from '@/store/settings';
 import { listProtections } from '@/services/protectionsService';
+import {
+  refreshRecalls,
+  findMatches,
+  notifyMatches,
+} from '@/services/recallService';
 import { formatDate, relativeDays } from '@/lib/dates';
-import type { ProtectionEntry } from '@/types';
+import type { ProtectionEntry, RecallMatch } from '@/types';
 
 function urgencyColor(days: number, theme: ReturnType<typeof useTheme>) {
   if (days < 0) return theme.colors.textMuted;
@@ -33,6 +39,8 @@ export default function ProtectionsScreen() {
   const t = useTheme();
   const { settings } = useSettings();
   const [entries, setEntries] = useState<ProtectionEntry[]>([]);
+  const [recalls, setRecalls] = useState<RecallMatch[]>([]);
+  const [checking, setChecking] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useFocusEffect(
@@ -40,8 +48,31 @@ export default function ProtectionsScreen() {
       listProtections()
         .then(setEntries)
         .finally(() => setLoaded(true));
+      // Show any recall matches already known from the local cache (no fetch).
+      findMatches().then(setRecalls).catch(() => setRecalls([]));
     }, []),
   );
+
+  // TASK 78 — on-demand recall check: refresh the CPSC cache, re-match, notify.
+  const onCheckRecalls = useCallback(async () => {
+    setChecking(true);
+    try {
+      const res = await refreshRecalls({ force: true });
+      const matches = await findMatches();
+      setRecalls(matches);
+      await notifyMatches(matches);
+      if (matches.length === 0) {
+        Alert.alert(
+          'No recalls found',
+          res.online
+            ? 'None of your purchases match recent recalls.'
+            : 'You appear offline — checked against the cached recall list and found no matches.',
+        );
+      }
+    } finally {
+      setChecking(false);
+    }
+  }, []);
 
   const returns = entries.filter((e) => e.kind === 'return' && e.daysRemaining >= 0);
   const warranties = entries.filter((e) => e.kind === 'warranty' && e.daysRemaining >= 0);
@@ -80,6 +111,36 @@ export default function ProtectionsScreen() {
           background={t.colors.brandTint}
         />
       </Row>
+
+      {/* TASK 78 — product recall alerts. */}
+      <View style={{ marginTop: t.spacing.md }}>
+        <Button
+          title={checking ? 'Checking recalls…' : 'Check for product recalls'}
+          icon="warning-outline"
+          variant="secondary"
+          loading={checking}
+          onPress={onCheckRecalls}
+        />
+      </View>
+      {recalls.length > 0 ? (
+        <>
+          <SectionHeader title={`Recall alerts (${recalls.length})`} />
+          <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
+            {recalls.map((m, i) => (
+              <View key={`${m.receiptId}-${m.recall.recall_id}`}>
+                {i > 0 ? <View style={{ height: 1, backgroundColor: t.colors.border }} /> : null}
+                <ListRow
+                  icon="warning-outline"
+                  iconColor={t.colors.danger}
+                  title={m.recall.title || 'Recalled product'}
+                  subtitle={`Matched “${m.matchedTerm}”${m.recall.hazard ? ` · ${m.recall.hazard}` : ''}`}
+                  onPress={() => router.push({ pathname: '/receipt/[id]', params: { id: m.receiptId } })}
+                />
+              </View>
+            ))}
+          </Card>
+        </>
+      ) : null}
 
       {loaded && returns.length === 0 && warranties.length === 0 ? (
         <EmptyState

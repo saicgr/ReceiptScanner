@@ -37,6 +37,7 @@ import { parseMoney } from '@/lib/money';
 import * as DB from '@/db';
 import { authenticate } from '@/services/appLock';
 import { exportReceiptsHtml, shareFile } from '@/services/exporters';
+import { exportAuditPacket } from '@/services/auditVaultService';
 import type { ImageFormat } from '@/types';
 
 // Common ISO 4217 codes offered in the default-currency picker. Mirrors the
@@ -77,6 +78,7 @@ export default function SettingsScreen() {
   // Guards the one-shot HTML export and the destructive clear-all so we don't
   // fire either twice while it's in flight.
   const [exportingHtml, setExportingHtml] = useState(false);
+  const [exportingAudit, setExportingAudit] = useState(false);
   const [clearing, setClearing] = useState(false);
 
   // App Lock requires a successful biometric/passcode prompt BEFORE we persist
@@ -124,6 +126,38 @@ export default function SettingsScreen() {
     }
   };
 
+  // TASK 84 — audit-defense export: an itemized export (CSV + PDF) bundled with
+  // every retained ORIGINAL receipt image, shared as a complete audit packet.
+  const onExportAuditPacket = async () => {
+    if (exportingAudit) return;
+    if (!settings.is_unlocked) {
+      Alert.alert(
+        'Unlock required',
+        'Exports are included in the one-time ReceiptSnap unlock — no subscriptions, no ads.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Unlock', onPress: () => router.push('/paywall') },
+        ],
+      );
+      return;
+    }
+    setExportingAudit(true);
+    try {
+      const res = await exportAuditPacket({});
+      Alert.alert(
+        'Audit packet ready',
+        `Packaged ${res.receiptCount} receipt(s): an itemized export plus ${res.imageUris.length} original image(s).`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error && e.message === 'empty-range'
+        ? 'There are no receipts to package yet.'
+        : 'Could not build the audit packet. Please try again.';
+      Alert.alert('Audit packet', msg);
+    } finally {
+      setExportingAudit(false);
+    }
+  };
+
   // Destructive, irreversible wipe of all local data. Double-confirm, then
   // delete every receipt plus mileage trips, cash expenses and statement
   // imports. Offline-first means there's no server copy — this is final.
@@ -165,6 +199,13 @@ export default function SettingsScreen() {
 
       const imports = await DB.Statements.listImports();
       await Promise.all(imports.map((imp) => DB.Statements.deleteImport(imp.id)));
+
+      // Standalone purchase-protection records (FK is SET NULL, so they survive
+      // receipt deletion) — remove them too so "clear all" really clears all.
+      const rebates = await DB.Rebates.listRebates();
+      await Promise.all(rebates.map((rb) => DB.Rebates.deleteRebate(rb.id)));
+      const pps = await DB.PriceProtections.listPriceProtections();
+      await Promise.all(pps.map((pp) => DB.PriceProtections.deletePriceProtection(pp.id)));
 
       Alert.alert('All data cleared', 'Your receipts, trips, cash expenses and statements were deleted.');
     } catch {
@@ -369,6 +410,18 @@ export default function SettingsScreen() {
       />
       <Text variant="caption" color={t.colors.textMuted} style={{ marginTop: 6 }}>
         Builds a page to view all your receipts on a computer.
+      </Text>
+      <Button
+        title="Audit defense export"
+        variant="secondary"
+        icon="shield-checkmark-outline"
+        loading={exportingAudit}
+        fullWidth
+        style={{ marginTop: t.spacing.md }}
+        onPress={onExportAuditPacket}
+      />
+      <Text variant="caption" color={t.colors.textMuted} style={{ marginTop: 6 }}>
+        Packages an itemized export plus every retained original image as proof.
       </Text>
       <Card padded={false} style={{ marginTop: t.spacing.md, paddingHorizontal: t.spacing.lg }}>
         <ListRow

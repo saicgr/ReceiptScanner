@@ -335,7 +335,79 @@ const m4_v5: Migration = async (db) => {
   `);
 };
 
+// ---------------------------------------------------------------------------
+// Migration 5 -> 6 : V6 purchase-protection toolkit
+//
+// Three independent, fully on-device feature tables:
+//   - rebates: mail-in rebate tracking (amount + submission/payout deadlines),
+//     reminded via the existing notification infra. Optionally linked to the
+//     receipt it came from (FK SET NULL so deleting the receipt keeps the
+//     rebate the user is still chasing).
+//   - price_protections: price-drop / price-protection claim reminders (paid vs
+//     later-seen price + a claim-window deadline).
+//   - recall_cache: a local cache of CPSC recall records so product-recall
+//     checks work offline and don't re-fetch on every view. recall_dismissals
+//     lets the user permanently dismiss a recall match for a receipt.
+// ---------------------------------------------------------------------------
+const m5_v6: Migration = async (db) => {
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS rebates (
+      id TEXT PRIMARY KEY NOT NULL,
+      receipt_id TEXT,
+      vendor TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      amount REAL NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      submission_deadline TEXT,
+      payout_deadline TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS price_protections (
+      id TEXT PRIMARY KEY NOT NULL,
+      receipt_id TEXT,
+      vendor TEXT NOT NULL DEFAULT '',
+      item_name TEXT NOT NULL DEFAULT '',
+      currency TEXT NOT NULL DEFAULT 'USD',
+      original_price REAL NOT NULL DEFAULT 0,
+      current_price REAL NOT NULL DEFAULT 0,
+      claim_deadline TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS recall_cache (
+      recall_id TEXT PRIMARY KEY NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      recall_date TEXT,
+      url TEXT NOT NULL DEFAULT '',
+      hazard TEXT NOT NULL DEFAULT '',
+      product_text TEXT NOT NULL DEFAULT '',
+      cached_at TEXT NOT NULL
+    );
+
+    -- Per-receipt dismissals so a user can permanently silence a recall match.
+    CREATE TABLE IF NOT EXISTS recall_dismissals (
+      receipt_id TEXT NOT NULL,
+      recall_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (receipt_id, recall_id),
+      FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rebates_receipt ON rebates(receipt_id);
+    CREATE INDEX IF NOT EXISTS idx_rebates_submission ON rebates(submission_deadline);
+    CREATE INDEX IF NOT EXISTS idx_price_protections_receipt ON price_protections(receipt_id);
+    CREATE INDEX IF NOT EXISTS idx_price_protections_deadline ON price_protections(claim_deadline);
+  `);
+};
+
 /** Ordered list. Index i migrates the schema from version i to i+1. */
-export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3, m3_v4, m4_v5];
+export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3, m3_v4, m4_v5, m5_v6];
 
 export const LATEST_VERSION = MIGRATIONS.length;

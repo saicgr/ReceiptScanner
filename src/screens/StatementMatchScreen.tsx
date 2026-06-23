@@ -55,6 +55,8 @@ import {
   type RawStatementLine,
 } from '@/lib/statementMatch';
 import { parseStatementCsv } from '@/lib/statementMatch';
+import { buildStatementInsights } from '@/services/statementInsights';
+import { cadenceLabel } from '@/lib/recurringCharges';
 import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import type { Receipt, StatementLine } from '@/types';
@@ -178,6 +180,15 @@ export default function StatementMatchScreen() {
     const unReceipts = receipts.filter((r) => !claimedReceiptIds.has(r.id));
     return { matchedRows: matched, unmatchedLines: unLines, unmatchedReceipts: unReceipts };
   }, [lines, suggestion, receiptById, receipts]);
+
+  // TASKS 82/83/85 — recurring charges, duplicate/overcharge anomalies, and
+  // missing-deduction nudges, all derived from the persisted statement lines.
+  const insights = useMemo(() => buildStatementInsights(lines), [lines]);
+  // Fast lookup so anomaly/recurring rows can show a line's description.
+  const lineByIndex = useCallback(
+    (i: number) => lines[i] ?? null,
+    [lines],
+  );
 
   // ---- Actions -------------------------------------------------------------
 
@@ -419,6 +430,118 @@ export default function StatementMatchScreen() {
               </Card>
             </>
           )}
+
+          {/* ---- TASK 82: Recurring / subscription charges ---- */}
+          {insights.recurring.length > 0 ? (
+            <>
+              <SectionHeader title={`Recurring charges (${insights.recurring.length})`} />
+              <Text variant="caption" color={t.colors.textMuted} style={{ marginBottom: t.spacing.sm }}>
+                Repeating charges that look like subscriptions — cancel the ones
+                you no longer use.
+              </Text>
+              <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
+                {insights.recurring.map((rec, i) => (
+                  <View key={`${rec.merchant}-${i}`}>
+                    {i > 0 ? <Divider spacing={0} /> : null}
+                    <Row align="center" style={{ paddingVertical: t.spacing.md }}>
+                      <View style={{ flex: 1, paddingRight: t.spacing.md }}>
+                        <Text variant="body" weight="500" numberOfLines={1}>
+                          {rec.merchant || 'Merchant'}
+                        </Text>
+                        <Text variant="caption" color={t.colors.textMuted}>
+                          {`${rec.count}× · ${cadenceLabel(rec.cadenceDays)}${
+                            rec.lastDate ? ` · last ${formatDate(rec.lastDate, dateFmt)}` : ''
+                          }`}
+                        </Text>
+                      </View>
+                      <Text variant="body" weight="600">
+                        {formatMoney(rec.amount, settings.default_currency)}
+                      </Text>
+                    </Row>
+                  </View>
+                ))}
+              </Card>
+            </>
+          ) : null}
+
+          {/* ---- TASK 83: Duplicate / overcharge anomalies ---- */}
+          {insights.anomalies.length > 0 ? (
+            <>
+              <SectionHeader title={`Possible billing errors (${insights.anomalies.length})`} />
+              <Text variant="caption" color={t.colors.textMuted} style={{ marginBottom: t.spacing.sm }}>
+                Likely double charges or tip/keying errors — worth a closer look.
+              </Text>
+              <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
+                {insights.anomalies.map((an, i) => (
+                  <View key={`${an.merchant}-${an.lineIndexes[0]}-${an.lineIndexes[1]}`}>
+                    {i > 0 ? <Divider spacing={0} /> : null}
+                    <Row align="center" style={{ paddingVertical: t.spacing.md }}>
+                      <View
+                        style={{
+                          width: 36, height: 36, borderRadius: t.radius.md,
+                          backgroundColor: t.colors.dangerTint,
+                          alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <IconButton icon={an.kind === 'duplicate' ? 'copy-outline' : 'alert-circle-outline'} color={t.colors.danger} />
+                      </View>
+                      <View style={{ flex: 1, paddingHorizontal: t.spacing.md }}>
+                        <Text variant="body" weight="500" numberOfLines={1}>
+                          {(lineByIndex(an.lineIndexes[0])?.description) || an.merchant}
+                        </Text>
+                        <Text variant="caption" color={t.colors.textMuted}>
+                          {an.reason}
+                        </Text>
+                      </View>
+                      <Text variant="body" weight="600" color={t.colors.danger}>
+                        {formatMoney(an.delta, settings.default_currency)}
+                      </Text>
+                    </Row>
+                  </View>
+                ))}
+              </Card>
+            </>
+          ) : null}
+
+          {/* ---- TASK 85: Missing receipt / lost deduction nudges ---- */}
+          {insights.missingDeductions.length > 0 ? (
+            <>
+              <SectionHeader title={`Possible lost deductions (${insights.missingDeductions.length})`} />
+              <Text variant="caption" color={t.colors.textMuted} style={{ marginBottom: t.spacing.sm }}>
+                Unmatched charges with no receipt — if any were business expenses,
+                you may be missing a deduction. Scan or add the receipt to claim it.
+              </Text>
+              <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
+                {insights.missingDeductions.map((nudge, i) => (
+                  <View key={nudge.lineId}>
+                    {i > 0 ? <Divider spacing={0} /> : null}
+                    <Row align="center" style={{ paddingVertical: t.spacing.md }}>
+                      <View
+                        style={{
+                          width: 36, height: 36, borderRadius: t.radius.md,
+                          backgroundColor: t.colors.warningTint,
+                          alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <IconButton icon="cash-outline" color={t.colors.warning} />
+                      </View>
+                      <View style={{ flex: 1, paddingHorizontal: t.spacing.md }}>
+                        <Text variant="body" weight="500" numberOfLines={1}>
+                          {nudge.description}
+                        </Text>
+                        <Text variant="caption" color={t.colors.textMuted}>
+                          {nudge.date ? formatDate(nudge.date, dateFmt) : 'No date'}
+                        </Text>
+                      </View>
+                      <Text variant="body" weight="600">
+                        {formatMoney(nudge.amount, settings.default_currency)}
+                      </Text>
+                    </Row>
+                  </View>
+                ))}
+              </Card>
+            </>
+          ) : null}
 
           <Spacer size={t.spacing.lg} />
           <Text variant="caption" color={t.colors.textMuted} align="center">

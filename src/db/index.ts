@@ -11,6 +11,9 @@ export * as CashExpenses from './cashExpenses';
 export * as Folders from './folders';
 export * as Revisions from './revisions';
 export * as Budgets from './budgets';
+export * as Rebates from './rebates';
+export * as PriceProtections from './priceProtections';
+export * as Recalls from './recalls';
 
 // Named re-exports for the most common direct calls.
 export {

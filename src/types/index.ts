@@ -637,3 +637,126 @@ export interface ProtectionEntry {
   serialNumber: string | null;
   productPhotoUri: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// V6: Purchase-protection toolkit
+//   - Mail-in rebate tracking (81)
+//   - Price-drop / price-protection claim reminders (79)
+//   - Product-recall cache (78)
+// These all run fully on-device. Recalls fetch a free public feed on demand and
+// cache the result; everything else is local SQLite.
+// ---------------------------------------------------------------------------
+
+/** Lifecycle of a tracked mail-in rebate. */
+export type RebateStatus = 'pending' | 'submitted' | 'received' | 'expired';
+
+/**
+ * A mail-in rebate the user is chasing. We track the rebate amount, the deadline
+ * to SUBMIT it and the (optional) deadline by which the payout should ARRIVE, so
+ * the existing notification infra can remind before each lapses. Optionally
+ * linked to the receipt it came from.
+ */
+export interface Rebate {
+  id: string;
+  receipt_id: string | null;
+  vendor: string;
+  description: string;
+  amount: number;
+  currency: string;
+  /** Deadline to postmark/submit the rebate. */
+  submission_deadline: string | null; // ISO date
+  /** Deadline by which the payout should arrive (chase if not). */
+  payout_deadline: string | null; // ISO date
+  status: RebateStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A price-protection / price-drop claim the user is tracking. They record the
+ * price they originally paid, the lower price they later saw, and the window
+ * (deadline) within which the card/retailer accepts a claim, then get reminded.
+ */
+export interface PriceProtection {
+  id: string;
+  receipt_id: string | null;
+  vendor: string;
+  item_name: string;
+  currency: string;
+  original_price: number;
+  current_price: number;
+  /** Last day a claim can be filed. */
+  claim_deadline: string | null; // ISO date
+  status: 'open' | 'claimed' | 'expired';
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * One cached CPSC recall record (the subset we use). Cached locally so recall
+ * checks work offline and don't re-hit the network on every screen view.
+ */
+export interface RecallRecord {
+  /** CPSC RecallID (stable upstream id). */
+  recall_id: string;
+  title: string;
+  recall_date: string | null; // ISO date
+  url: string;
+  /** Hazard summary (joined hazard names). */
+  hazard: string;
+  /** Lower-cased product names + descriptions, joined, for cheap matching. */
+  product_text: string;
+  cached_at: string;
+}
+
+/** A recall matched against a purchased item, surfaced in the UI. */
+export interface RecallMatch {
+  recall: RecallRecord;
+  /** The receipt/line-item text that triggered the match. */
+  matchedTerm: string;
+  receiptId: string;
+  lineItemId: string | null;
+}
+
+/**
+ * A hint about purchase/return/warranty protection a payment method (typically a
+ * credit card) commonly provides. Static, on-device rules — informational only.
+ */
+export interface CardBenefitHint {
+  kind: 'warranty' | 'price_protection' | 'return_protection' | 'purchase_protection';
+  title: string;
+  detail: string;
+}
+
+/**
+ * A flagged recurring/subscription charge detected in imported statement data:
+ * the same (or near-same) amount recurring for the same merchant.
+ */
+export interface RecurringCharge {
+  /** Normalized merchant key the charges share. */
+  merchant: string;
+  /** Representative (most common) amount. */
+  amount: number;
+  /** Number of charges in the group. */
+  count: number;
+  /** Detected cadence in days (median gap), null when indeterminate. */
+  cadenceDays: number | null;
+  /** Statement-line indexes that make up the group. */
+  lineIndexes: number[];
+  /** ISO date of the most recent charge in the group, if known. */
+  lastDate: string | null;
+}
+
+/**
+ * A likely duplicate charge or tip/overcharge error detected in statement data.
+ */
+export interface ChargeAnomaly {
+  kind: 'duplicate' | 'overcharge';
+  merchant: string;
+  /** The two statement-line indexes involved. */
+  lineIndexes: [number, number];
+  amounts: [number, number];
+  /** For overcharge: the extra amount; for duplicate: the repeated amount. */
+  delta: number;
+  reason: string;
+}

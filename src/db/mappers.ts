@@ -26,6 +26,10 @@ import type {
   ReceiptRevision,
   RevisionKind,
   AuditLogEntry,
+  Rebate,
+  RebateStatus,
+  PriceProtection,
+  RecallRecord,
 } from '../types';
 import { toBool } from './database';
 
@@ -247,6 +251,50 @@ export function mapCategoryBudget(r: any): CategoryBudget {
     currency: r.currency ?? 'USD',
     created_at: r.created_at,
     updated_at: r.updated_at,
+  };
+}
+
+export function mapRebate(r: any): Rebate {
+  return {
+    id: r.id,
+    receipt_id: r.receipt_id ?? null,
+    vendor: r.vendor ?? '',
+    description: r.description ?? '',
+    amount: Number(r.amount ?? 0),
+    currency: r.currency ?? 'USD',
+    submission_deadline: r.submission_deadline ?? null,
+    payout_deadline: r.payout_deadline ?? null,
+    status: (r.status ?? 'pending') as RebateStatus,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+export function mapPriceProtection(r: any): PriceProtection {
+  return {
+    id: r.id,
+    receipt_id: r.receipt_id ?? null,
+    vendor: r.vendor ?? '',
+    item_name: r.item_name ?? '',
+    currency: r.currency ?? 'USD',
+    original_price: Number(r.original_price ?? 0),
+    current_price: Number(r.current_price ?? 0),
+    claim_deadline: r.claim_deadline ?? null,
+    status: (r.status ?? 'open') as PriceProtection['status'],
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+export function mapRecallRecord(r: any): RecallRecord {
+  return {
+    recall_id: r.recall_id,
+    title: r.title ?? '',
+    recall_date: r.recall_date ?? null,
+    url: r.url ?? '',
+    hazard: r.hazard ?? '',
+    product_text: r.product_text ?? '',
+    cached_at: r.cached_at,
   };
 }
 

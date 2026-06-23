@@ -215,11 +215,67 @@ export async function scheduleProtectionReminders(
 }
 
 /**
+ * Generic deadline reminders for any tracked entity (rebates, price-protection
+ * claims, …). Mirrors the receipt-protection scheduler but keyed by an arbitrary
+ * `entityKey` so each feature owns its own AsyncStorage namespace and cancel
+ * scope. Schedules one date-trigger per provided deadline `daysBefore` ahead,
+ * skipping past fire-dates. Re-scheduling first cancels the previous batch.
+ *
+ * @returns the newly scheduled notification ids.
+ */
+export async function scheduleDeadlineReminders(
+  entityKey: string,
+  reminders: {
+    deadline: string | null;
+    daysBefore: number;
+    title: string;
+    body: string;
+    data?: Record<string, unknown>;
+  }[],
+): Promise<string[]> {
+  await cancelEntityReminders(entityKey);
+
+  const granted = await ensurePermissions();
+  if (!granted) return [];
+
+  const ids: string[] = [];
+  for (const r of reminders) {
+    if (!r.deadline) continue;
+    const fire = reminderFireDate(r.deadline, r.daysBefore);
+    if (!fire) continue;
+    const id = await scheduleAt(fire, r.title, r.body, {
+      entityKey,
+      deadline: r.deadline,
+      ...(r.data ?? {}),
+    });
+    if (id) ids.push(id);
+  }
+
+  if (ids.length > 0) {
+    try {
+      await AsyncStorage.setItem(entityKey, JSON.stringify(ids));
+    } catch {
+      // Non-fatal: reminders are scheduled, just not precisely cancelable later.
+    }
+  }
+  return ids;
+}
+
+/** Cancel every reminder scheduled under a generic entity key. */
+export async function cancelEntityReminders(entityKey: string): Promise<void> {
+  await cancelByKey(entityKey);
+}
+
+/**
  * Cancel every reminder previously scheduled for a receipt and clear its
  * AsyncStorage mapping. Safe to call for receipts with no reminders.
  */
 export async function cancelReceiptReminders(receiptId: string): Promise<void> {
-  const key = storageKey(receiptId);
+  await cancelByKey(storageKey(receiptId));
+}
+
+/** Shared cancel routine: read the id list at `key`, cancel each, clear the key. */
+async function cancelByKey(key: string): Promise<void> {
   let ids: string[] = [];
   try {
     const raw = await AsyncStorage.getItem(key);
