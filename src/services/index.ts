@@ -14,3 +14,4 @@ export * from './billingService';
 export * from './emailIngestService';
 export * from './protectionsService';
 export * from './taxReportService';
+export * from './folderExport';

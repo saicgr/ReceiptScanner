@@ -87,6 +87,7 @@ export default function StatisticsScreen() {
   const [byCategory, setByCategory] = useState<CategorySpend[]>([]);
   const [byCompany, setByCompany] = useState<GroupedSpend[]>([]);
   const [byPayment, setByPayment] = useState<GroupedSpend[]>([]);
+  const [bySubcategory, setBySubcategory] = useState<GroupedSpend[]>([]);
   const [byItem, setByItem] = useState<GroupedSpend[]>([]);
   const [byMonth, setByMonth] = useState<MonthlySpend[]>([]);
   const [trips, setTrips] = useState<MileageTrip[]>([]);
@@ -94,12 +95,13 @@ export default function StatisticsScreen() {
 
   const load = useCallback(async () => {
     const f = rangeToFilter(range);
-    const [q, ct, cat, comp, pay, item, month, allTrips] = await Promise.all([
+    const [q, ct, cat, comp, pay, sub, item, month, allTrips] = await Promise.all([
       DB.quickStats(f),
       DB.totalsByCurrency(f),
       DB.spendByCategory(f),
       DB.spendByCompany(f),
       DB.spendByPaymentMethod(f),
+      DB.spendBySubcategory(f),
       DB.spendByItem(f),
       DB.spendByMonth(f),
       DB.Mileage.listTrips(),
@@ -109,6 +111,7 @@ export default function StatisticsScreen() {
     setByCategory(cat);
     setByCompany(comp);
     setByPayment(pay);
+    setBySubcategory(sub);
     setByItem(item);
     setByMonth(month);
     // Mileage has no SQL date filter — apply the same range in JS on the
@@ -139,6 +142,7 @@ export default function StatisticsScreen() {
   const catRows = useMemo(() => byCategory.filter((r) => r.currency === cur), [byCategory, cur]);
   const companyRows = useMemo(() => byCompany.filter((r) => r.currency === cur), [byCompany, cur]);
   const paymentRows = useMemo(() => byPayment.filter((r) => r.currency === cur), [byPayment, cur]);
+  const subcategoryRows = useMemo(() => bySubcategory.filter((r) => r.currency === cur), [bySubcategory, cur]);
   const itemRows = useMemo(() => byItem.filter((r) => r.currency === cur), [byItem, cur]);
   const monthRows = useMemo(() => byMonth.filter((r) => r.currency === cur), [byMonth, cur]);
 
@@ -261,15 +265,25 @@ export default function StatisticsScreen() {
             currency={cur}
             rows={catRows.map((r) => ({ label: r.categoryName, color: r.color, total: r.total, count: r.count }))}
           />
+          {/* By subcategory — only meaningful once the user has subcategories. */}
+          {subcategoryRows.some((r) => r.key !== null) ? (
+            <BreakdownCard
+              theme={t}
+              title="By subcategory"
+              currency={cur}
+              rows={subcategoryRows.map((r) => ({ label: r.label, color: r.color, total: r.total, count: r.count }))}
+            />
+          ) : null}
           <BreakdownCard
             theme={t}
             title="By company"
             currency={cur}
             rows={companyRows.map((r) => ({ label: r.label, color: r.color, total: r.total, count: r.count }))}
           />
+          {/* By account — payment methods (cash, bank, credit card) are accounts. */}
           <BreakdownCard
             theme={t}
-            title="By payment method"
+            title="By account"
             currency={cur}
             rows={paymentRows.map((r) => ({ label: r.label, color: r.color, total: r.total, count: r.count }))}
           />

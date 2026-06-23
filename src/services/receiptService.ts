@@ -24,7 +24,13 @@ import { useSettings } from '@/store/settings';
 import { useLookups } from '@/store/lookups';
 import { buildFilename, type FilenameContext } from '@/lib/filename';
 import { contentHash, duplicateScore } from '@/lib/hash';
-import type { LineItem, Receipt } from '@/types';
+import type {
+  LineItem,
+  Receipt,
+  ReceiptWithRelations,
+  RevisionSnapshot,
+} from '@/types';
+import type { AuditChange } from '@/db/revisions';
 
 import { persistReceiptImages } from './imagePipeline';
 import {
@@ -136,6 +142,100 @@ function draftIdentity(state: DraftState): {
     total: state.total(),
     currency: state.currency,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Versioning helpers (immutable original + edit-change log)
+// ---------------------------------------------------------------------------
+
+/** Receipt fields tracked in the edit-change log (and revert). */
+const TRACKED_FIELDS: (keyof Receipt)[] = [
+  'vendor',
+  'date',
+  'total',
+  'tax',
+  'currency',
+  'category_id',
+  'payment_method_id',
+  'memo',
+  'tax_category_id',
+  'is_deductible',
+  'deductible_percent',
+];
+
+/** Build a revertible snapshot from a fully-loaded receipt. */
+function snapshotFromReceipt(r: ReceiptWithRelations): RevisionSnapshot {
+  const receipt: Partial<Receipt> = {};
+  for (const k of TRACKED_FIELDS) {
+    (receipt as any)[k] = r[k];
+  }
+  receipt.date_confidence = r.date_confidence;
+  receipt.date_ambiguous = r.date_ambiguous;
+  receipt.date_options = r.date_options;
+  receipt.field_confidence = r.field_confidence;
+  return {
+    receipt,
+    line_items: r.line_items.map((li) => ({
+      name: li.name,
+      qty: li.qty,
+      price: li.price,
+      included: li.included,
+      category_id: li.category_id,
+      sort_order: li.sort_order,
+    })),
+  };
+}
+
+/** Stringify a value for the audit log (null → '—'). */
+function auditValue(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v);
+}
+
+/** Compute the field-level changes between an existing receipt and the draft. */
+function diffReceipt(
+  before: ReceiptWithRelations,
+  after: Partial<Receipt>,
+): AuditChange[] {
+  const changes: AuditChange[] = [];
+  for (const k of TRACKED_FIELDS) {
+    const oldV = (before as any)[k];
+    const newV = (after as any)[k];
+    if (newV === undefined) continue;
+    if (auditValue(oldV) !== auditValue(newV)) {
+      changes.push({ field: k, old: auditValue(oldV), new: auditValue(newV) });
+    }
+  }
+  return changes;
+}
+
+/**
+ * Revert a receipt to a saved snapshot (typically the immutable original
+ * extraction). Re-applies the snapshot's tracked fields + line items and records
+ * the revert in the audit log. Image files and folder labels are left intact.
+ */
+export async function revertToSnapshot(
+  receiptId: string,
+  snapshot: RevisionSnapshot,
+): Promise<void> {
+  const before = await DB.getReceipt(receiptId);
+  if (!before) return;
+
+  await DB.updateReceipt(receiptId, snapshot.receipt);
+  await DB.replaceLineItems(receiptId, snapshot.line_items);
+
+  // recomputeTotals (inside replaceLineItems) may override total when there are
+  // items; when there are none, restore the snapshot's stored total explicitly.
+  if (snapshot.line_items.length === 0 && snapshot.receipt.total !== undefined) {
+    await DB.updateReceipt(receiptId, { total: snapshot.receipt.total });
+  }
+
+  const changes = diffReceipt(before, snapshot.receipt);
+  await DB.Revisions.logChanges(receiptId, [
+    { field: 'reverted', old: null, new: 'restored original extraction' },
+    ...changes,
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +372,24 @@ export async function persistDraft(opts?: {
       image_uris: pageImageUris,
       tag_ids: state.tagIds,
     });
+    // Capture the IMMUTABLE original-extraction snapshot exactly once, so the
+    // user can always revert to what the AI first produced. Best-effort.
+    try {
+      const created = await DB.getReceipt(id);
+      if (created) {
+        await DB.Revisions.saveRevision(id, 'original', snapshotFromReceipt(created));
+      }
+    } catch {
+      // Versioning is non-critical; never block the save over it.
+    }
   } else {
+    // Record the field-level edit log BEFORE mutating (compare old vs. new).
+    let changes: AuditChange[] = [];
+    try {
+      changes = diffReceipt(existing, baseFields);
+    } catch {
+      changes = [];
+    }
     // Update path: patch the receipt then replace its child rows so deletions
     // in the review screen are honored.
     await DB.updateReceipt(id, baseFields);
@@ -281,6 +398,18 @@ export async function persistDraft(opts?: {
     await DB.setReceiptImages(id, pageImageUris);
     // replaceLineItems recomputes totals from items; when there are no items the
     // user-entered total stands (already written via updateReceipt above).
+    try {
+      if (existing.line_items.length !== lineItems.length) {
+        changes.push({
+          field: 'line_items',
+          old: String(existing.line_items.length),
+          new: String(lineItems.length),
+        });
+      }
+      await DB.Revisions.logChanges(id, changes);
+    } catch {
+      // Logging is best-effort.
+    }
   }
 
   // 7) (Re)schedule protection reminders. Cancel any prior ones on edit so we

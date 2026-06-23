@@ -246,8 +246,16 @@ export default function SettingsScreen() {
         <ListRow
           icon="pricetags-outline"
           title="Categories"
+          subtitle="Tap a category to nest it as a subcategory"
           rightText={String(lookups.categories.length)}
           onPress={() => router.push('/settings/categories')}
+        />
+        <Divider spacing={0} />
+        <ListRow
+          icon="folder-outline"
+          title="Folders"
+          subtitle="Group by Client / Project / Trip — manage in the Receipts tab"
+          onPress={() => router.push('/(tabs)/history')}
         />
         <Divider spacing={0} />
         <ListRow

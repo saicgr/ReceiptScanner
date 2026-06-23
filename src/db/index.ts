@@ -8,6 +8,8 @@ export * as Tags from './tags';
 export * as Mileage from './mileage';
 export * as Statements from './statements';
 export * as CashExpenses from './cashExpenses';
+export * as Folders from './folders';
+export * as Revisions from './revisions';
 
 // Named re-exports for the most common direct calls.
 export {
@@ -29,6 +31,7 @@ export {
   spendByCompany,
   spendByPaymentMethod,
   spendByItem,
+  spendBySubcategory,
   quickStats,
   countReceipts,
 } from './receipts';

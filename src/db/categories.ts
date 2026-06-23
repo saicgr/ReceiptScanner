@@ -25,7 +25,7 @@ export async function createCategory(
       )
     )?.n ?? 0);
   await db.runAsync(
-    'INSERT INTO categories (id, name, color, icon, is_default, sort_order) VALUES (?,?,?,?,?,?)',
+    'INSERT INTO categories (id, name, color, icon, is_default, sort_order, parent_id) VALUES (?,?,?,?,?,?,?)',
     [
       id,
       input.name ?? 'New Category',
@@ -33,6 +33,7 @@ export async function createCategory(
       input.icon ?? 'tag',
       toInt(input.is_default ?? false),
       order,
+      input.parent_id ?? null,
     ],
   );
   return (await getCategory(id))!;
@@ -54,7 +55,7 @@ export async function updateCategory(
   const db = await getDb();
   const fields: string[] = [];
   const params: any[] = [];
-  for (const k of ['name', 'color', 'icon', 'sort_order'] as const) {
+  for (const k of ['name', 'color', 'icon', 'sort_order', 'parent_id'] as const) {
     if (patch[k] !== undefined) {
       fields.push(`${k} = ?`);
       params.push(patch[k]);

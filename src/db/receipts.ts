@@ -658,6 +658,41 @@ export async function spendByItem(
   }));
 }
 
+/**
+ * Spend grouped by SUBCATEGORY (Statistics: "By Subcategory"). A receipt's
+ * subcategory is its category when that category has a parent_id set; receipts
+ * in a top-level category are bucketed as "(no subcategory)". Grouped per
+ * currency so totals are never mixed.
+ */
+export async function spendBySubcategory(
+  filter: ExportFilter = {},
+): Promise<import('../types').GroupedSpend[]> {
+  const db = await getDb();
+  const { whereSql, params } = buildStatWhere(filter);
+  const rows = await db.getAllAsync<any>(
+    `SELECT c.id as key,
+            COALESCE(c.name, '(no subcategory)') as label,
+            COALESCE(c.color, '#94A3B8') as color,
+            r.currency as currency,
+            SUM(r.total) as total,
+            COUNT(*) as count
+     FROM receipts r
+     LEFT JOIN categories c ON c.id = r.category_id AND c.parent_id IS NOT NULL
+     ${whereSql}
+     GROUP BY (CASE WHEN c.parent_id IS NOT NULL THEN c.id ELSE NULL END), r.currency
+     ORDER BY total DESC`,
+    params,
+  );
+  return rows.map((r) => ({
+    key: r.key ?? null,
+    label: r.key ? r.label : '(no subcategory)',
+    color: r.key ? r.color : '#94A3B8',
+    currency: r.currency,
+    total: Number(r.total ?? 0),
+    count: Number(r.count ?? 0),
+  }));
+}
+
 /** Headline quick stats per currency (total, avg, highest, most frequent vendor). */
 export async function quickStats(
   filter: ExportFilter = {},

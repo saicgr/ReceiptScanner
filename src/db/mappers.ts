@@ -21,6 +21,10 @@ import type {
   StatementLine,
   StatementImport,
   CashExpense,
+  Folder,
+  ReceiptRevision,
+  RevisionKind,
+  AuditLogEntry,
 } from '../types';
 import { toBool } from './database';
 
@@ -122,6 +126,7 @@ export function mapCategory(r: any): Category {
     icon: r.icon ?? 'tag',
     is_default: toBool(r.is_default),
     sort_order: Number(r.sort_order ?? 0),
+    parent_id: r.parent_id ?? null,
   };
 }
 
@@ -197,6 +202,39 @@ export function mapStatementLine(r: any): StatementLine {
     description: r.description ?? '',
     matched_receipt_id: r.matched_receipt_id ?? null,
     match_score: Number(r.match_score ?? 0),
+  };
+}
+
+export function mapFolder(r: any): Folder {
+  return {
+    id: r.id,
+    name: r.name,
+    parent_id: r.parent_id ?? null,
+    color: r.color ?? '#0E7C66',
+    icon: r.icon ?? 'folder',
+    sort_order: Number(r.sort_order ?? 0),
+    created_at: r.created_at,
+  };
+}
+
+export function mapReceiptRevision(r: any): ReceiptRevision {
+  return {
+    id: r.id,
+    receipt_id: r.receipt_id,
+    kind: (r.kind ?? 'manual') as RevisionKind,
+    snapshot_json: r.snapshot_json ?? '{}',
+    created_at: r.created_at,
+  };
+}
+
+export function mapAuditLogEntry(r: any): AuditLogEntry {
+  return {
+    id: r.id,
+    receipt_id: r.receipt_id,
+    field: r.field,
+    old_value: r.old_value ?? null,
+    new_value: r.new_value ?? null,
+    created_at: r.created_at,
   };
 }
 

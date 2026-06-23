@@ -12,6 +12,7 @@ import { useFocusEffect } from 'expo-router';
 import {
   Button,
   Card,
+  Chip,
   Divider,
   EmptyState,
   Icon,
@@ -58,6 +59,8 @@ export default function CategoriesScreen() {
   const [name, setName] = useState('');
   const [color, setColor] = useState(SWATCHES[0]);
   const [icon, setIcon] = useState<IconName>('cart');
+  // Subcategory: optional parent category (null = top-level category).
+  const [parentId, setParentId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -82,6 +85,7 @@ export default function CategoriesScreen() {
     setName('');
     setColor(SWATCHES[0]);
     setIcon('cart');
+    setParentId(null);
     setModalOpen(true);
   };
 
@@ -90,6 +94,7 @@ export default function CategoriesScreen() {
     setName(c.name);
     setColor(c.color);
     setIcon(c.icon as IconName);
+    setParentId(c.parent_id);
     setModalOpen(true);
   };
 
@@ -99,9 +104,9 @@ export default function CategoriesScreen() {
     setSaving(true);
     try {
       if (editing) {
-        await DB.updateCategory(editing.id, { name: trimmed, color, icon });
+        await DB.updateCategory(editing.id, { name: trimmed, color, icon, parent_id: parentId });
       } else {
-        await DB.createCategory({ name: trimmed, color, icon });
+        await DB.createCategory({ name: trimmed, color, icon, parent_id: parentId });
       }
       setModalOpen(false);
       await load();
@@ -140,7 +145,13 @@ export default function CategoriesScreen() {
             <View key={c.id}>
               <ListRow
                 title={c.name}
-                subtitle={c.is_default ? 'Default' : undefined}
+                subtitle={
+                  c.parent_id
+                    ? `Subcategory of ${items.find((p) => p.id === c.parent_id)?.name ?? '—'}`
+                    : c.is_default
+                      ? 'Default'
+                      : undefined
+                }
                 left={
                   <View
                     style={{
@@ -185,10 +196,15 @@ export default function CategoriesScreen() {
         name={name}
         color={color}
         icon={icon}
+        parentId={parentId}
+        parentOptions={items.filter(
+          (c) => c.parent_id === null && c.id !== editing?.id,
+        )}
         saving={saving}
         onChangeName={setName}
         onChangeColor={setColor}
         onChangeIcon={setIcon}
+        onChangeParent={setParentId}
         onClose={() => setModalOpen(false)}
         onSave={save}
       />
@@ -203,10 +219,13 @@ function CategoryEditorModal({
   name,
   color,
   icon,
+  parentId,
+  parentOptions,
   saving,
   onChangeName,
   onChangeColor,
   onChangeIcon,
+  onChangeParent,
   onClose,
   onSave,
 }: {
@@ -215,10 +234,13 @@ function CategoryEditorModal({
   name: string;
   color: string;
   icon: IconName;
+  parentId: string | null;
+  parentOptions: Category[];
   saving: boolean;
   onChangeName: (v: string) => void;
   onChangeColor: (v: string) => void;
   onChangeIcon: (v: IconName) => void;
+  onChangeParent: (v: string | null) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
@@ -316,6 +338,33 @@ function CategoryEditorModal({
                 );
               })}
             </Row>
+
+            {/* Parent category — promotes this to a SUBCATEGORY (second level). */}
+            {parentOptions.length > 0 ? (
+              <>
+                <Spacer size={20} />
+                <Text variant="label" color={t.colors.textMuted}>
+                  PARENT CATEGORY (OPTIONAL)
+                </Text>
+                <Spacer size={8} />
+                <Row gap={t.spacing.sm} wrap>
+                  <Chip
+                    label="Top level"
+                    selected={parentId === null}
+                    onPress={() => onChangeParent(null)}
+                  />
+                  {parentOptions.map((p) => (
+                    <Chip
+                      key={p.id}
+                      label={p.name}
+                      color={p.color}
+                      selected={parentId === p.id}
+                      onPress={() => onChangeParent(p.id)}
+                    />
+                  ))}
+                </Row>
+              </>
+            ) : null}
 
             <Spacer size={24} />
             <Button

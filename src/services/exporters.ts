@@ -165,6 +165,53 @@ export async function exportReceipts(
 }
 
 /**
+ * Export an EXPLICIT list of receipts (already loaded with relations) in one of
+ * the file formats. Used by the folder-bundle export, where membership is a
+ * many-to-many label that a plain ExportFilter can't express. The output is
+ * identical to `exportReceipts` — fully itemized, memo + tags always present.
+ * The accounting + mileage/cash extras are intentionally NOT mixed in here:
+ * a folder bundle is a point-in-time snapshot of exactly those receipts.
+ */
+export async function exportReceiptList(
+  format: AccountingFormat,
+  receipts: ReceiptWithRelations[],
+  stem: string,
+): Promise<string> {
+  const [settings, categories, payments, taxCategories] = await Promise.all([
+    getAllSettings(),
+    DB.listCategories(),
+    DB.listPaymentMethods(),
+    DB.listTaxCategories(),
+  ]);
+  const lookups = buildLookups(categories, payments, taxCategories);
+  const rows = receipts.flatMap((r) =>
+    receiptToRows(r, settings.date_format, lookups),
+  );
+
+  switch (format) {
+    case 'html':
+      return writeDocHtml(
+        receiptsBrowserHtml(receipts, settings.date_format, lookups),
+        stem,
+      );
+    case 'pdf':
+      return writePdf(itemizedHtml(rows), stem);
+    case 'quickbooks_csv':
+      return writeTextFile(quickbooksCsv(receipts, settings.date_format), stem, 'csv');
+    case 'quickbooks_iif':
+      return writeTextFile(quickbooksIif(receipts, lookups), stem, 'iif');
+    case 'xero_csv':
+      return writeTextFile(xeroCsv(receipts), stem, 'csv');
+    case 'wave_csv':
+      return writeTextFile(waveCsv(receipts, lookups), stem, 'csv');
+    case 'csv':
+    case 'excel':
+    default:
+      return writeTextFile(itemizedCsv(rows), stem, 'csv');
+  }
+}
+
+/**
  * Browse-anywhere HTML export. Writes a SINGLE self-contained .html file (inline
  * <style>, no external assets) into FileSystem.documentDirectory that the user
  * can open on any computer to browse ALL their receipts. Like every other

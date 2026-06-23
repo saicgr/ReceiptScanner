@@ -234,7 +234,81 @@ const m2_v3: Migration = async (db) => {
   await addColumn(db, 'receipts', 'captured_lng', 'REAL');
 };
 
+// ---------------------------------------------------------------------------
+// Migration 3 -> 4 : V4 file-manager folders + subcategories + versioning
+//
+// Folders are a MANY-TO-MANY label layer over the single underlying receipt
+// (receipt_folders join table) so adding a receipt to a folder NEVER duplicates
+// the record — stats/totals/deductions can therefore never double-count. They
+// are orthogonal to category/tax/payment metadata (a separate entity). Nested
+// folders are modelled by a self-referential parent_id (Client -> Project ->
+// Trip). `categories.parent_id` adds an optional second level (subcategory) that
+// is likewise orthogonal — a subcategory is just a category whose parent is set.
+//
+// Versioning: receipt_revisions keeps an immutable snapshot of the AI's original
+// extraction (kind='original', captured once at create) plus optional manual
+// snapshots, enabling revert-to-original. receipt_audit_log is a lightweight
+// edit-change log (field-level before/after rows).
+// ---------------------------------------------------------------------------
+const m3_v4: Migration = async (db) => {
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS folders (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      parent_id TEXT,
+      color TEXT NOT NULL DEFAULT '#0E7C66',
+      icon TEXT NOT NULL DEFAULT 'folder',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
+    );
+
+    -- Many-to-many: one underlying receipt can be LABELLED into many folders.
+    CREATE TABLE IF NOT EXISTS receipt_folders (
+      receipt_id TEXT NOT NULL,
+      folder_id TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      PRIMARY KEY (receipt_id, folder_id),
+      FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE CASCADE,
+      FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
+    );
+
+    -- Immutable point-in-time snapshots (kind='original' is never overwritten).
+    CREATE TABLE IF NOT EXISTS receipt_revisions (
+      id TEXT PRIMARY KEY NOT NULL,
+      receipt_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'manual',
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE CASCADE
+    );
+
+    -- Lightweight edit-change log (one row per changed field).
+    CREATE TABLE IF NOT EXISTS receipt_audit_log (
+      id TEXT PRIMARY KEY NOT NULL,
+      receipt_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (receipt_id) REFERENCES receipts(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_receipt_folders_folder ON receipt_folders(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_receipt_folders_receipt ON receipt_folders(receipt_id);
+    CREATE INDEX IF NOT EXISTS idx_receipt_revisions_receipt ON receipt_revisions(receipt_id);
+    CREATE INDEX IF NOT EXISTS idx_receipt_audit_receipt ON receipt_audit_log(receipt_id);
+  `);
+
+  // Subcategory: a category may point at a parent category (second level only).
+  await addColumn(db, 'categories', 'parent_id', 'TEXT');
+  await db.execAsync(
+    'CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);',
+  );
+};
+
 /** Ordered list. Index i migrates the schema from version i to i+1. */
-export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3];
+export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3, m3_v4];
 
 export const LATEST_VERSION = MIGRATIONS.length;

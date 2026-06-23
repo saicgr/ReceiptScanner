@@ -172,6 +172,12 @@ export interface Category {
   icon: string; // icon key from theme/icons
   is_default: boolean;
   sort_order: number;
+  /**
+   * Optional second-level grouping: when set, this category is a SUBCATEGORY of
+   * `parent_id`. Kept to a single level (a subcategory never has children of its
+   * own) and orthogonal to folders/tax/payment.
+   */
+  parent_id: string | null;
 }
 
 /** Tax-deduction layer (V2). e.g. "Meals (50%)", "Home Office". */
@@ -199,6 +205,68 @@ export interface Tag {
   color: string;
   /** Marks a tag as representing a job/trip for the dedicated filters. */
   kind: 'tag' | 'job' | 'trip';
+}
+
+// ---------------------------------------------------------------------------
+// Folders — a file-manager-style label layer (Client -> Project -> Trip)
+// ---------------------------------------------------------------------------
+
+/**
+ * A nestable folder. Folders are a MANY-TO-MANY label over the single
+ * underlying receipt (see receipt_folders): "add to folder" never copies the
+ * record, so stats/totals/deductions can never double-count. Folders are
+ * orthogonal to category/tax/payment metadata — purely an organization view.
+ */
+export interface Folder {
+  id: string;
+  name: string;
+  /** Parent folder id for nesting; null at the top level. */
+  parent_id: string | null;
+  color: string; // hex
+  icon: string; // Ionicons glyph key
+  sort_order: number;
+  created_at: string;
+}
+
+/** A folder decorated with the counts shown in the file browser. */
+export interface FolderNode extends Folder {
+  /** Number of direct child folders. */
+  childCount: number;
+  /** Number of receipts labelled directly into THIS folder (not descendants). */
+  receiptCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Versioning — immutable original + edit-change log (lightweight)
+// ---------------------------------------------------------------------------
+
+/** What a saved snapshot represents. `original` = the AI's first extraction. */
+export type RevisionKind = 'original' | 'manual';
+
+/** A point-in-time snapshot of a receipt + its line items (for revert). */
+export interface ReceiptRevision {
+  id: string;
+  receipt_id: string;
+  kind: RevisionKind;
+  /** JSON-encoded { receipt: Partial<Receipt>, line_items: Partial<LineItem>[] }. */
+  snapshot_json: string;
+  created_at: string;
+}
+
+/** Decoded revision snapshot payload. */
+export interface RevisionSnapshot {
+  receipt: Partial<Receipt>;
+  line_items: Partial<LineItem>[];
+}
+
+/** One field-level change recorded in the receipt's edit log. */
+export interface AuditLogEntry {
+  id: string;
+  receipt_id: string;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------

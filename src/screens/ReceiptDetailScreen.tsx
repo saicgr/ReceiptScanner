@@ -32,11 +32,18 @@ import { fonts } from '@/theme';
 import { useSettings } from '@/store/settings';
 import { useLookups } from '@/store/lookups';
 import { useDraft } from '@/store/draft';
+import { FolderPickerSheet } from '@/components/FolderPickerSheet';
 import * as DB from '@/db';
-import { deleteReceiptCascade } from '@/services/receiptService';
+import { decodeSnapshot } from '@/db/revisions';
+import { deleteReceiptCascade, revertToSnapshot } from '@/services/receiptService';
 import { formatMoney } from '@/lib/money';
 import { formatDate, relativeDays } from '@/lib/dates';
-import type { ReceiptWithRelations } from '@/types';
+import type {
+  AuditLogEntry,
+  Folder,
+  ReceiptRevision,
+  ReceiptWithRelations,
+} from '@/types';
 
 function urgencyColor(iso: string, theme: ReturnType<typeof useTheme>) {
   const days = Math.round(
@@ -68,6 +75,10 @@ export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [receipt, setReceipt] = useState<ReceiptWithRelations | null>(null);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [revisions, setRevisions] = useState<ReceiptRevision[]>([]);
+  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -76,8 +87,16 @@ export default function ReceiptDetailScreen() {
       setLoaded(true);
       return;
     }
-    const r = await DB.getReceipt(id);
+    const [r, fs, revs, log] = await Promise.all([
+      DB.getReceipt(id),
+      DB.Folders.foldersForReceipt(id),
+      DB.Revisions.listRevisions(id),
+      DB.Revisions.listAuditLog(id),
+    ]);
     setReceipt(r);
+    setFolders(fs);
+    setRevisions(revs);
+    setAuditLog(log);
     setLoaded(true);
   }, [id]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -129,6 +148,42 @@ export default function ReceiptDetailScreen() {
   const openViewer = (index: number) => {
     if (viewerUris.length === 0) return;
     router.push({ pathname: '/image-viewer', params: { uris: JSON.stringify(viewerUris), index: String(index) } });
+  };
+
+  const onSetFolders = async (folderIds: string[]) => {
+    setFolderPickerOpen(false);
+    await DB.Folders.setReceiptFolders(r.id, folderIds);
+    load();
+  };
+
+  const original = revisions.find((rev) => rev.kind === 'original') ?? null;
+  const onRevert = () => {
+    if (!original) return;
+    const snapshot = decodeSnapshot(original);
+    if (!snapshot) {
+      Alert.alert('Revert', 'The original snapshot could not be read.');
+      return;
+    }
+    Alert.alert(
+      'Revert to original?',
+      "This restores the AI's original extraction (vendor, date, total, tax, line items). Your edits are replaced; the original image and folders are kept.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revert',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await revertToSnapshot(r.id, snapshot);
+              await load();
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const hasProtections = !!(r.return_deadline || r.warranty_deadline);
@@ -303,6 +358,59 @@ export default function ReceiptDetailScreen() {
             </>
           ) : null}
 
+          {/* Folders — many-to-many labels (never duplicates the receipt). */}
+          <SectionLabel text={folders.length ? `Folders · ${folders.length}` : 'Folders'} />
+          <Row gap={t.spacing.sm} wrap align="center">
+            {folders.map((f) => (
+              <Chip
+                key={f.id}
+                label={f.name}
+                color={f.color}
+                icon="folder-outline"
+                onPress={() => router.push({ pathname: '/folder/[id]', params: { id: f.id } })}
+              />
+            ))}
+            <Chip label="Add to folders" icon="add" onPress={() => setFolderPickerOpen(true)} />
+          </Row>
+
+          {/* Version history: revert-to-original + edit-change log. */}
+          {(original || auditLog.length > 0) ? (
+            <>
+              <SectionLabel text="Version history" />
+              <FieldCard>
+                {original ? (
+                  <Row justify="space-between" align="center" style={{ paddingVertical: 4 }}>
+                    <Row gap={10} align="center" style={{ flex: 1 }}>
+                      <Ionicons name="sparkles-outline" size={18} color={t.colors.brand} />
+                      <View style={{ flex: 1 }}>
+                        <RNText style={{ color: t.colors.text, fontFamily: fonts.sansSemibold, fontSize: 14.5 }}>Original AI extraction</RNText>
+                        <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12.5 }}>
+                          Captured {formatDate(original.created_at.slice(0, 10), settings.date_format)}
+                        </RNText>
+                      </View>
+                    </Row>
+                    <Pressable onPress={onRevert} hitSlop={6} accessibilityLabel="Revert to original">
+                      <RNText style={{ color: t.colors.brand, fontFamily: fonts.sansBold, fontSize: 13 }}>Revert</RNText>
+                    </Pressable>
+                  </Row>
+                ) : null}
+                {original && auditLog.length > 0 ? (
+                  <View style={{ height: 1, backgroundColor: t.colors.border, marginVertical: 8 }} />
+                ) : null}
+                {auditLog.slice(0, 12).map((entry) => (
+                  <View key={entry.id} style={{ paddingVertical: 5 }}>
+                    <RNText style={{ color: t.colors.text, fontFamily: fonts.sansSemibold, fontSize: 13 }}>
+                      {prettyField(entry.field)}
+                    </RNText>
+                    <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12 }}>
+                      {entry.old_value ?? '—'} → {entry.new_value ?? '—'} · {formatDate(entry.created_at.slice(0, 10), settings.date_format)}
+                    </RNText>
+                  </View>
+                ))}
+              </FieldCard>
+            </>
+          ) : null}
+
           {/* Primary action. */}
           <View style={{ marginTop: t.spacing.xl }}>
             <Button title="Edit receipt" icon="create-outline" size="lg" onPress={onEdit} />
@@ -310,9 +418,37 @@ export default function ReceiptDetailScreen() {
         </View>
       </ScrollView>
 
-      <LoadingOverlay visible={busy} message="Deleting…" />
+      <FolderPickerSheet
+        visible={folderPickerOpen}
+        title="Add to folders"
+        selected={folders.map((f) => f.id)}
+        onConfirm={onSetFolders}
+        onClose={() => setFolderPickerOpen(false)}
+      />
+
+      <LoadingOverlay visible={busy} message="Working…" />
     </View>
   );
+}
+
+/** Human-readable label for an audit-log field key. */
+function prettyField(field: string): string {
+  const map: Record<string, string> = {
+    vendor: 'Vendor',
+    date: 'Date',
+    total: 'Total',
+    tax: 'Tax',
+    currency: 'Currency',
+    category_id: 'Category',
+    payment_method_id: 'Payment method',
+    memo: 'Memo',
+    tax_category_id: 'Tax category',
+    is_deductible: 'Deductible',
+    deductible_percent: 'Deductible %',
+    line_items: 'Line items',
+    reverted: 'Reverted',
+  };
+  return map[field] ?? field;
 }
 
 /** Translucent circular icon button used on the emerald hero. */

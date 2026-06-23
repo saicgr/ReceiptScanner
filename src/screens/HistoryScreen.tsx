@@ -32,6 +32,7 @@ import {
   EmptyState,
   IconButton,
   Button,
+  SegmentedControl,
   SelectSheet,
   LoadingOverlay,
   useTheme,
@@ -40,6 +41,7 @@ import {
 } from '@/components/ui';
 import { useSettings } from '@/store/settings';
 import { useLookups } from '@/store/lookups';
+import { FolderPickerSheet } from '@/components/FolderPickerSheet';
 import * as DB from '@/db';
 import { batchRename, deleteReceiptCascade } from '@/services/receiptService';
 import { exportReceipts, shareFile } from '@/services/exporters';
@@ -48,6 +50,7 @@ import { formatDate, todayIso } from '@/lib/dates';
 import type {
   AccountingFormat,
   ExportFilter,
+  FolderNode,
   Receipt,
 } from '@/types';
 
@@ -105,6 +108,15 @@ export default function HistoryScreen() {
   const { settings } = useSettings();
   const lookups = useLookups();
 
+  // View mode: folder navigation is the PRIMARY view (file-manager style); the
+  // chronological list is a toggle. Folded into this one "Receipts" tab so the
+  // tab bar stays <= 5.
+  const [view, setView] = useState<'folders' | 'list'>('folders');
+  const [rootFolders, setRootFolders] = useState<FolderNode[]>([]);
+  const [unfiledCount, setUnfiledCount] = useState(0);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+
   // Search + filter state. `categoryIds`/`tagIds` are multi-select; `range` is a
   // single preset. Together they form the one `currentFilter` reused everywhere.
   const [search, setSearch] = useState('');
@@ -114,6 +126,8 @@ export default function HistoryScreen() {
 
   // Active sheet (only one open at a time).
   const [sheet, setSheet] = useState<'category' | 'tag' | 'range' | 'export' | null>(null);
+  // Folder picker for the "add selected receipts to folder" bulk action.
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
 
   // Data buckets: pending (top) + finalized (grouped by month below).
   const [pending, setPending] = useState<Receipt[]>([]);
@@ -153,12 +167,29 @@ export default function HistoryScreen() {
     setFinalized(fin);
   }, [currentFilter, search]);
 
+  // Load the top-level folders + the count of receipts in NO folder ("Unfiled").
+  const loadFolders = useCallback(async () => {
+    const [roots, all] = await Promise.all([
+      DB.Folders.listFolderNodes(null),
+      DB.listReceipts({ status: 'all' }),
+    ]);
+    setRootFolders(roots);
+    // Count receipts not labelled into ANY folder so nothing is hidden.
+    let unfiled = 0;
+    for (const r of all) {
+      const fs = await DB.Folders.foldersForReceipt(r.id);
+      if (fs.length === 0) unfiled += 1;
+    }
+    setUnfiledCount(unfiled);
+  }, []);
+
   // Reload on focus and whenever the filter/search changes while focused.
   useFocusEffect(
     useCallback(() => {
       lookups.refresh();
       load();
-    }, [load, lookups.refresh]),
+      loadFolders();
+    }, [load, loadFolders, lookups.refresh]),
   );
 
   // ---- month grouping for the finalized list ----
@@ -247,6 +278,33 @@ export default function HistoryScreen() {
     }
   };
 
+  // ---- add selected receipts to folders (bulk label, never copies) ----
+  const runAddToFolders = async (folderIds: string[]) => {
+    setFolderPickerOpen(false);
+    const ids = [...selected];
+    if (ids.length === 0 || folderIds.length === 0) return;
+    setBusy('Filing…');
+    try {
+      for (const fid of folderIds) {
+        await DB.Folders.addReceiptsToFolder(ids, fid);
+      }
+    } finally {
+      setBusy(null);
+      exitSelect();
+      loadFolders();
+    }
+  };
+
+  // ---- create a top-level folder ----
+  const createFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    await DB.Folders.createFolder({ name });
+    setNewFolderName('');
+    setCreatingFolder(false);
+    loadFolders();
+  };
+
   // ---- export ----
   const runExport = async (format: AccountingFormat) => {
     setSheet(null);
@@ -301,6 +359,11 @@ export default function HistoryScreen() {
           </Row>
           <Row gap={t.spacing.sm}>
             <IconButton
+              icon="folder-open-outline"
+              onPress={() => setFolderPickerOpen(true)}
+              accessibilityLabel="Add to folder"
+            />
+            <IconButton
               icon="pricetag-outline"
               onPress={runBatchRename}
               accessibilityLabel="Batch rename"
@@ -315,7 +378,7 @@ export default function HistoryScreen() {
         </Row>
       ) : (
         <Row justify="space-between" align="center">
-          <Text variant="title">History</Text>
+          <Text variant="title">Receipts</Text>
           <IconButton
             icon="share-outline"
             size={24}
@@ -325,7 +388,94 @@ export default function HistoryScreen() {
         </Row>
       )}
 
+      {/* Files / All toggle — folder nav is primary, chronological is the toggle. */}
+      {!selectMode ? (
+        <View style={{ marginTop: t.spacing.md }}>
+          <SegmentedControl
+            options={[
+              { label: 'Files', value: 'folders' },
+              { label: 'All', value: 'list' },
+            ]}
+            value={view}
+            onChange={(v) => setView(v)}
+          />
+        </View>
+      ) : null}
+
+      {/* ---------------- FOLDERS (file-manager) view ---------------- */}
+      {view === 'folders' && !selectMode ? (
+        <View style={{ marginTop: t.spacing.md }}>
+          <SectionHeader title={`Folders · ${rootFolders.length}`} />
+          <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
+            {rootFolders.map((f, i) => (
+              <Pressable
+                key={f.id}
+                onPress={() => router.push({ pathname: '/folder/[id]', params: { id: f.id } })}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: t.spacing.md,
+                  paddingVertical: t.spacing.md,
+                  borderTopWidth: i === 0 ? 0 : 1,
+                  borderTopColor: t.colors.border,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <View style={{ width: 36, height: 36, borderRadius: t.radius.md, backgroundColor: f.color + '22', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="folder" size={18} color={f.color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text variant="body" weight="600">{f.name}</Text>
+                  <Text variant="caption" color={t.colors.textMuted}>
+                    {f.childCount} folder{f.childCount === 1 ? '' : 's'} · {f.receiptCount} receipt{f.receiptCount === 1 ? '' : 's'}
+                  </Text>
+                </View>
+                <Icon name="chevron-forward" size={18} color={t.colors.textMuted} />
+              </Pressable>
+            ))}
+            {creatingFolder ? (
+              <Row gap={t.spacing.sm} align="center" style={{ paddingVertical: t.spacing.sm, borderTopWidth: rootFolders.length ? 1 : 0, borderTopColor: t.colors.border }}>
+                <View style={{ flex: 1 }}>
+                  <TextField value={newFolderName} onChangeText={setNewFolderName} placeholder="New folder name" autoFocus style={{ marginBottom: 0 }} />
+                </View>
+                <IconButton icon="checkmark" color={t.colors.brand} onPress={createFolder} accessibilityLabel="Create folder" />
+                <IconButton icon="close" onPress={() => { setCreatingFolder(false); setNewFolderName(''); }} accessibilityLabel="Cancel" />
+              </Row>
+            ) : (
+              <Pressable
+                onPress={() => setCreatingFolder(true)}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: t.spacing.md,
+                  paddingVertical: t.spacing.md,
+                  borderTopWidth: rootFolders.length ? 1 : 0,
+                  borderTopColor: t.colors.border,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Icon name="add-circle-outline" size={22} color={t.colors.brand} />
+                <Text variant="body" color={t.colors.brand} weight="600">New folder</Text>
+              </Pressable>
+            )}
+          </Card>
+
+          {unfiledCount > 0 ? (
+            <Text variant="caption" color={t.colors.textMuted} style={{ marginTop: t.spacing.sm }}>
+              {unfiledCount} receipt{unfiledCount === 1 ? '' : 's'} not in any folder. Switch to “All” to see everything, then long-press to file them.
+            </Text>
+          ) : null}
+
+          <EmptyState
+            icon="folder-outline"
+            title={rootFolders.length === 0 ? 'No folders yet' : 'Organize with folders'}
+            message="Group receipts by Client, Project or Trip. Adding a receipt to a folder is just a label — it never duplicates the receipt, so your totals stay correct."
+          />
+        </View>
+      ) : null}
+
       {/* Search bar (vendor + memo). Re-queries on submit/blur for snappy typing. */}
+      {view === 'list' || selectMode ? (
       <View style={{ marginTop: t.spacing.md }}>
         <TextField
           value={search}
@@ -351,7 +501,10 @@ export default function HistoryScreen() {
           }
         />
       </View>
+      ) : null}
 
+      {view === 'list' || selectMode ? (
+      <>
       {/* Filter chips: category, tag/job, date range. Each opens its SelectSheet. */}
       <Row gap={t.spacing.sm} wrap style={{ marginBottom: t.spacing.sm }}>
         <Chip
@@ -461,6 +614,8 @@ export default function HistoryScreen() {
           onPress={() => setSheet('export')}
         />
       ) : null}
+      </>
+      ) : null}
 
       {/* ---- Sheets ---- */}
       <SelectSheet
@@ -508,6 +663,14 @@ export default function HistoryScreen() {
           if (fmt) runExport(fmt);
         }}
         onClose={() => setSheet(null)}
+      />
+
+      <FolderPickerSheet
+        visible={folderPickerOpen}
+        title={`Add ${selected.size} receipt${selected.size === 1 ? '' : 's'} to folders`}
+        selected={[]}
+        onConfirm={runAddToFolders}
+        onClose={() => setFolderPickerOpen(false)}
       />
 
       <LoadingOverlay visible={busy !== null} message={busy ?? undefined} />
