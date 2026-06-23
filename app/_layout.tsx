@@ -58,9 +58,12 @@ export default function RootLayout() {
           <Stack.Screen name="settings/payment-methods" options={{ title: 'Payment Methods' }} />
           <Stack.Screen name="settings/tags" options={{ title: 'Tags & Jobs' }} />
           <Stack.Screen name="settings/tax-categories" options={{ title: 'Tax Categories' }} />
+          <Stack.Screen name="settings/budgets" options={{ title: 'Budgets' }} />
+          <Stack.Screen name="budget-report" options={{ title: 'Budget vs Actual' }} />
           <Stack.Screen name="settings/filename" options={{ title: 'Filename Template' }} />
           <Stack.Screen name="settings/backup" options={{ title: 'Backup & Restore' }} />
           <Stack.Screen name="settings/about" options={{ title: 'About' }} />
+          <Stack.Screen name="settings/roadmap" options={{ title: 'Roadmap' }} />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

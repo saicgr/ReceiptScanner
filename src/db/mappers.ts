@@ -21,6 +21,7 @@ import type {
   StatementLine,
   StatementImport,
   CashExpense,
+  CategoryBudget,
   Folder,
   ReceiptRevision,
   RevisionKind,
@@ -235,6 +236,17 @@ export function mapAuditLogEntry(r: any): AuditLogEntry {
     old_value: r.old_value ?? null,
     new_value: r.new_value ?? null,
     created_at: r.created_at,
+  };
+}
+
+export function mapCategoryBudget(r: any): CategoryBudget {
+  return {
+    id: r.id,
+    category_id: r.category_id,
+    amount: Number(r.amount ?? 0),
+    currency: r.currency ?? 'USD',
+    created_at: r.created_at,
+    updated_at: r.updated_at,
   };
 }
 

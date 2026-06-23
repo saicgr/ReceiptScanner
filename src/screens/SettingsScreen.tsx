@@ -278,6 +278,13 @@ export default function SettingsScreen() {
           rightText={String(lookups.taxCategories.length)}
           onPress={() => router.push('/settings/tax-categories')}
         />
+        <Divider spacing={0} />
+        <ListRow
+          icon="pie-chart-outline"
+          title="Budgets"
+          subtitle="Monthly cap per category with colored gauges on Home"
+          onPress={() => router.push('/settings/budgets')}
+        />
       </Card>
 
       {/* Scanning & files */}
@@ -497,6 +504,13 @@ export default function SettingsScreen() {
       {/* About & sharing */}
       <SectionHeader title="About" />
       <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
+        <ListRow
+          icon="map-outline"
+          title="Roadmap & Feature Requests"
+          subtitle="See what's coming and vote on what's next"
+          onPress={() => router.push('/settings/roadmap')}
+        />
+        <Divider spacing={0} />
         <ListRow icon="information-circle-outline" title="About ReceiptSnap" onPress={() => router.push('/settings/about')} />
         <Divider spacing={0} />
         <ListRow icon="share-social-outline" title="Share with friends" onPress={shareWithFriends} />

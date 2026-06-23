@@ -29,7 +29,8 @@ import { formatMoney } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
 import { fetchForwardingAddress, importPendingReceipts } from '@/services/emailIngestService';
 import { useDraft } from '@/store/draft';
-import type { Receipt, CurrencyTotal } from '@/types';
+import { BudgetGauge } from '@/components/charts';
+import type { Receipt, CurrencyTotal, BudgetStatus } from '@/types';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -40,6 +41,7 @@ export default function HomeScreen() {
   const [recent, setRecent] = useState<Receipt[]>([]);
   const [count, setCount] = useState(0);
   const [monthTotals, setMonthTotals] = useState<CurrencyTotal[]>([]);
+  const [budgets, setBudgets] = useState<BudgetStatus[]>([]);
   const [address, setAddress] = useState<string>(settings.forwarding_address);
   const [checking, setChecking] = useState(false);
 
@@ -51,9 +53,14 @@ export default function HomeScreen() {
     setRecent(list);
     setCount(n);
     const start = new Date();
-    const monthStart = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-01`;
-    setMonthTotals(await DB.totalsByCurrency({ startDate: monthStart }));
-  }, []);
+    const monthKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`;
+    const totals = await DB.totalsByCurrency({ startDate: `${monthKey}-01` });
+    setMonthTotals(totals);
+    // Budget gauges for the current month in the primary (largest-spend) currency,
+    // falling back to the default currency when there is no spend yet.
+    const gaugeCurrency = totals[0]?.currency ?? settings.default_currency;
+    setBudgets(await DB.Budgets.budgetStatuses(monthKey, gaugeCurrency));
+  }, [settings.default_currency]);
 
   useFocusEffect(
     useCallback(() => {
@@ -180,6 +187,25 @@ export default function HomeScreen() {
               subTone="muted"
             />
           </Row>
+
+          {/* Budget gauges — current month spend vs each category's monthly cap. */}
+          {budgets.length > 0 ? (
+            <View style={{ marginTop: t.spacing.md, backgroundColor: t.colors.card, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.colors.border, padding: t.spacing.lg, gap: t.spacing.md, ...t.shadow(1) }}>
+              <Row justify="space-between" align="center">
+                <Text variant="caption" color={t.colors.textFaint} style={{ letterSpacing: 1.4, fontFamily: fonts.sansBold }}>
+                  THIS MONTH'S BUDGETS
+                </Text>
+                <Pressable onPress={() => router.push('/budget-report')} hitSlop={8}>
+                  <Text variant="label" color={t.colors.brand}>
+                    Compare
+                  </Text>
+                </Pressable>
+              </Row>
+              {budgets.slice(0, 5).map((b) => (
+                <BudgetGauge key={b.categoryId} status={b} />
+              ))}
+            </View>
+          ) : null}
 
           {/* Email forwarding */}
           {address ? (

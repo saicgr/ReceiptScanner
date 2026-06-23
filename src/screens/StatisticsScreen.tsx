@@ -30,6 +30,7 @@ import {
 } from '@/components/ui';
 import { useSettings } from '@/store/settings';
 import * as DB from '@/db';
+import { PieChart, BarChart, LineChart, type PieSlice, type BarDatum, type LinePoint } from '@/components/charts';
 import { formatMoney, round2 } from '@/lib/money';
 import { formatDate, todayIso } from '@/lib/dates';
 import type {
@@ -37,6 +38,7 @@ import type {
   CurrencyTotal,
   CategorySpend,
   MonthlySpend,
+  DailySpend,
   GroupedSpend,
   ExportFilter,
   MileageTrip,
@@ -90,12 +92,13 @@ export default function StatisticsScreen() {
   const [bySubcategory, setBySubcategory] = useState<GroupedSpend[]>([]);
   const [byItem, setByItem] = useState<GroupedSpend[]>([]);
   const [byMonth, setByMonth] = useState<MonthlySpend[]>([]);
+  const [byDay, setByDay] = useState<DailySpend[]>([]);
   const [trips, setTrips] = useState<MileageTrip[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     const f = rangeToFilter(range);
-    const [q, ct, cat, comp, pay, sub, item, month, allTrips] = await Promise.all([
+    const [q, ct, cat, comp, pay, sub, item, month, day, allTrips] = await Promise.all([
       DB.quickStats(f),
       DB.totalsByCurrency(f),
       DB.spendByCategory(f),
@@ -104,6 +107,7 @@ export default function StatisticsScreen() {
       DB.spendBySubcategory(f),
       DB.spendByItem(f),
       DB.spendByMonth(f),
+      DB.spendByDay(f),
       DB.Mileage.listTrips(),
     ]);
     setQuick(q);
@@ -114,6 +118,7 @@ export default function StatisticsScreen() {
     setBySubcategory(sub);
     setByItem(item);
     setByMonth(month);
+    setByDay(day);
     // Mileage has no SQL date filter — apply the same range in JS on the
     // trip's start date so it tracks the selected chips like everything else.
     setTrips(
@@ -145,6 +150,7 @@ export default function StatisticsScreen() {
   const subcategoryRows = useMemo(() => bySubcategory.filter((r) => r.currency === cur), [bySubcategory, cur]);
   const itemRows = useMemo(() => byItem.filter((r) => r.currency === cur), [byItem, cur]);
   const monthRows = useMemo(() => byMonth.filter((r) => r.currency === cur), [byMonth, cur]);
+  const dayRows = useMemo(() => byDay.filter((r) => r.currency === cur), [byDay, cur]);
 
   // Mileage roll-up for the range ("mileage entries flow into reports"). Trips
   // carry no currency of their own — amounts are always in the default currency.
@@ -258,6 +264,16 @@ export default function StatisticsScreen() {
             </>
           ) : null}
 
+          {/* Spend-by-category PIE (donut) chart — visual companion to the bars. */}
+          {catRows.some((r) => r.total > 0) ? (
+            <>
+              <SectionHeader title="Spend by category" />
+              <Card>
+                <CategoryPie theme={t} currency={cur} rows={catRows} />
+              </Card>
+            </>
+          ) : null}
+
           {/* Horizontal-bar breakdowns. */}
           <BreakdownCard
             theme={t}
@@ -294,10 +310,22 @@ export default function StatisticsScreen() {
             rows={itemRows.map((r) => ({ label: r.label, color: r.color, total: r.total, count: r.count }))}
           />
 
-          {/* Monthly trend — vertical bars. */}
-          <SectionHeader title="Monthly trend" />
+          {/* Monthly spending — SVG bar chart (replaces the plain-View bars). */}
+          <SectionHeader title="Monthly spending" />
           <Card>
-            <MonthlyTrend theme={t} currency={cur} rows={monthRows} />
+            <MonthlyBars theme={t} currency={cur} rows={monthRows} />
+          </Card>
+
+          {/* Spending trend over time — SVG line chart. */}
+          <SectionHeader title="Spending trend" />
+          <Card>
+            <TrendLine theme={t} currency={cur} rows={monthRows} />
+          </Card>
+
+          {/* Daily spending pattern — SVG bar chart of spend per day. */}
+          <SectionHeader title="Daily spending" />
+          <Card>
+            <DailyBars theme={t} currency={cur} rows={dayRows} />
           </Card>
 
           {/* Drill-down links to the deeper reports. */}
@@ -434,9 +462,70 @@ function BreakdownCard({
 }
 
 // ---------------------------------------------------------------------------
-// MonthlyTrend — vertical bars, one per month, height as a % of the max month.
+// CategoryPie — donut of spend by category with a legend. Amounts formatted via
+// formatMoney; the donut centre shows the formatted total for the currency.
 // ---------------------------------------------------------------------------
-function MonthlyTrend({
+function CategoryPie({
+  theme: t,
+  currency,
+  rows,
+}: {
+  theme: Theme;
+  currency: string;
+  rows: CategorySpend[];
+}) {
+  // Top categories as slices; lump the long tail into a single "Other" slice so
+  // the donut stays legible. Totals are already currency-sliced by the caller.
+  const positive = rows.filter((r) => r.total > 0);
+  const top = positive.slice(0, 6);
+  const rest = positive.slice(6);
+  const slices: PieSlice[] = top.map((r) => ({
+    key: r.categoryId ?? r.categoryName,
+    label: r.categoryName,
+    value: r.total,
+    color: r.color || t.colors.brand,
+  }));
+  if (rest.length) {
+    slices.push({
+      key: '__other__',
+      label: 'Other',
+      value: rest.reduce((s, r) => s + r.total, 0),
+      color: t.colors.textFaint,
+    });
+  }
+  const total = positive.reduce((s, r) => s + r.total, 0);
+
+  return (
+    <Row gap={t.spacing.lg} align="center">
+      <PieChart
+        slices={slices}
+        centerTop="TOTAL"
+        centerBottom={formatMoney(total, currency)}
+      />
+      <View style={{ flex: 1, gap: 8 }}>
+        {slices.map((s) => {
+          const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
+          return (
+            <Row key={s.key} gap={t.spacing.sm}>
+              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: s.color }} />
+              <Text numberOfLines={1} style={{ flex: 1 }}>
+                {s.label}
+              </Text>
+              <Text variant="caption" color={t.colors.textMuted}>
+                {pct}%
+              </Text>
+            </Row>
+          );
+        })}
+      </View>
+    </Row>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MonthlyBars — SVG bar chart, one bar per month (most recent 12).
+// ---------------------------------------------------------------------------
+function MonthlyBars({
   theme: t,
   currency,
   rows,
@@ -452,40 +541,93 @@ function MonthlyTrend({
       </Text>
     );
   }
-  // Keep the most recent 12 months so the row of bars stays readable.
   const recent = rows.slice(-12);
-  const max = Math.max(...recent.map((r) => r.total), 0.01);
   const peak = recent.reduce((a, b) => (b.total > a.total ? b : a), recent[0]);
-
+  const data: BarDatum[] = recent.map((r) => ({
+    key: r.month,
+    label: monthLabel(r.month),
+    value: r.total,
+  }));
   return (
-    <View style={{ gap: t.spacing.sm }}>
-      {/* The peak month, labelled with its formatted amount for quick reading. */}
-      <Row justify="space-between">
-        <Text variant="caption" color={t.colors.textMuted}>Peak</Text>
-        <Text variant="caption" weight="600">{formatMoney(peak.total, currency)}</Text>
-      </Row>
-      <Row gap={t.spacing.xs} align="flex-end" justify="space-between" style={{ height: 120 }}>
-        {recent.map((r) => {
-          const h = Math.max(4, Math.round((r.total / max) * 110));
-          return (
-            <View key={r.month} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
-              <View
-                style={{
-                  width: '70%',
-                  height: h,
-                  borderRadius: t.radius.sm,
-                  backgroundColor: r.month === peak.month ? t.colors.brand : t.colors.brandLight,
-                }}
-              />
-              {/* Month label = the "MM" portion; full date format respected. */}
-              <Text variant="caption" color={t.colors.textMuted}>
-                {monthLabel(r.month)}
-              </Text>
-            </View>
-          );
-        })}
-      </Row>
-    </View>
+    <BarChart
+      data={data}
+      caption="Peak month"
+      peakLabel={formatMoney(peak.total, currency)}
+      labelEvery={recent.length > 8 ? 2 : 1}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TrendLine — SVG line chart of the monthly totals over time.
+// ---------------------------------------------------------------------------
+function TrendLine({
+  theme: t,
+  currency,
+  rows,
+}: {
+  theme: Theme;
+  currency: string;
+  rows: MonthlySpend[];
+}) {
+  if (rows.length < 2) {
+    return (
+      <Text variant="caption" color={t.colors.textMuted} align="center">
+        Need at least two months of dated receipts to chart a trend.
+      </Text>
+    );
+  }
+  const recent = rows.slice(-12);
+  const latest = recent[recent.length - 1];
+  const data: LinePoint[] = recent.map((r) => ({
+    key: r.month,
+    label: monthLabel(r.month),
+    value: r.total,
+  }));
+  return (
+    <LineChart
+      data={data}
+      caption="Latest month"
+      peakLabel={formatMoney(latest.total, currency)}
+      labelEvery={recent.length > 8 ? 2 : 1}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DailyBars — SVG bar chart of spend per day across the selected range (capped
+// to the most recent 31 days so the axis stays readable).
+// ---------------------------------------------------------------------------
+function DailyBars({
+  theme: t,
+  currency,
+  rows,
+}: {
+  theme: Theme;
+  currency: string;
+  rows: DailySpend[];
+}) {
+  if (!rows.length) {
+    return (
+      <Text variant="caption" color={t.colors.textMuted} align="center">
+        No dated receipts in this range.
+      </Text>
+    );
+  }
+  const recent = rows.slice(-31);
+  const peak = recent.reduce((a, b) => (b.total > a.total ? b : a), recent[0]);
+  const data: BarDatum[] = recent.map((r) => ({
+    key: r.date,
+    label: formatDate(r.date, 'D'),
+    value: r.total,
+  }));
+  return (
+    <BarChart
+      data={data}
+      caption="Busiest day"
+      peakLabel={formatMoney(peak.total, currency)}
+      labelEvery={recent.length > 12 ? Math.ceil(recent.length / 8) : 1}
+    />
   );
 }
 

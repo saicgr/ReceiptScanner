@@ -308,7 +308,34 @@ const m3_v4: Migration = async (db) => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// Migration 4 -> 5 : V5 per-category monthly budgets
+//
+// One row per category holding a single monthly budget amount (the cap the user
+// expects to spend in that category each month). Currency is stored alongside so
+// a budget is always compared against same-currency spend — multi-currency
+// totals are never mixed (the gauges/Budget-vs-Actual view filter by currency).
+// A NULL category_id row would be ambiguous, so budgets are keyed strictly to a
+// real category via a FK that cascades on category delete.
+// ---------------------------------------------------------------------------
+const m4_v5: Migration = async (db) => {
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS category_budgets (
+      id TEXT PRIMARY KEY NOT NULL,
+      category_id TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (category_id, currency),
+      FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_category_budgets_category ON category_budgets(category_id);
+  `);
+};
+
 /** Ordered list. Index i migrates the schema from version i to i+1. */
-export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3, m3_v4];
+export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3, m3_v4, m4_v5];
 
 export const LATEST_VERSION = MIGRATIONS.length;

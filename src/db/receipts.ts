@@ -546,6 +546,29 @@ export async function spendByMonth(
   }));
 }
 
+/**
+ * Spend grouped by individual calendar DAY (daily-pattern chart). Only dated,
+ * finalized receipts are counted; grouped per currency so totals never mix.
+ */
+export async function spendByDay(
+  filter: ExportFilter = {},
+): Promise<import('../types').DailySpend[]> {
+  const db = await getDb();
+  const { whereSql, params } = buildStatWhere(filter);
+  const rows = await db.getAllAsync<any>(
+    `SELECT r.date as date, r.currency as currency, SUM(r.total) as total
+     FROM receipts r ${whereSql} AND r.date IS NOT NULL
+     GROUP BY r.date, currency
+     ORDER BY r.date ASC`,
+    params,
+  );
+  return rows.map((r) => ({
+    date: r.date,
+    currency: r.currency,
+    total: Number(r.total ?? 0),
+  }));
+}
+
 function buildStatWhere(filter: ExportFilter): {
   whereSql: string;
   params: any[];

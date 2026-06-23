@@ -180,6 +180,54 @@ export interface Category {
   parent_id: string | null;
 }
 
+/**
+ * A per-category MONTHLY budget (V5). The `amount` is the cap the user expects
+ * to spend in `category_id` each month, denominated in `currency` so it is only
+ * ever compared against same-currency spend (multi-currency totals never mix).
+ */
+export interface CategoryBudget {
+  id: string;
+  category_id: string;
+  amount: number;
+  currency: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A budget joined with the current period's actual spend — what the Home gauges
+ * and the Budget-vs-Actual view render. `level` buckets spend-vs-budget into the
+ * green/amber/red traffic light.
+ */
+export interface BudgetStatus {
+  categoryId: string;
+  categoryName: string;
+  color: string;
+  currency: string;
+  budget: number;
+  spent: number;
+  /** spent / budget, 0..(>1). 0 when budget is 0 to avoid divide-by-zero. */
+  ratio: number;
+  remaining: number; // budget - spent (may be negative when over)
+  level: 'under' | 'near' | 'over';
+}
+
+/** One category's budget vs actual for a single month (12-month report). */
+export interface BudgetMonthCell {
+  month: string; // YYYY-MM
+  spent: number;
+}
+
+/** Per-category 12-month Budget-vs-Actual series. */
+export interface BudgetVsActual {
+  categoryId: string;
+  categoryName: string;
+  color: string;
+  currency: string;
+  budget: number;
+  months: BudgetMonthCell[];
+}
+
 /** Tax-deduction layer (V2). e.g. "Meals (50%)", "Home Office". */
 export interface TaxCategory {
   id: string;
@@ -532,6 +580,13 @@ export interface CategorySpend {
 
 export interface MonthlySpend {
   month: string; // YYYY-MM
+  currency: string;
+  total: number;
+}
+
+/** Spend grouped by a single calendar day (daily-pattern chart). */
+export interface DailySpend {
+  date: string; // YYYY-MM-DD
   currency: string;
   total: number;
 }
