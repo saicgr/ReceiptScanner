@@ -10,8 +10,9 @@
 // items at zero votes) and WRITES throw a tagged `store_unavailable` error that
 // the routes turn into a 503. The proxy never crashes on a storage outage.
 //
-// The server uses the SERVICE ROLE key, which bypasses RLS — so the tables can
-// (and should) have RLS enabled with no anon policies, locking out the public.
+// The server uses a SECRET key (modern `sb_secret_...`, or the legacy
+// service_role JWT), which bypasses RLS — so the tables can (and should) have
+// RLS enabled with no anon policies, locking out the public.
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
@@ -23,12 +24,12 @@ let triedInit = false;
 function getClient() {
   if (triedInit) return client;
   triedInit = true;
-  const { url, serviceRoleKey } = config.supabase;
-  if (!url || !serviceRoleKey) {
+  const { url, secretKey } = config.supabase;
+  if (!url || !secretKey) {
     client = null;
     return null;
   }
-  client = createClient(url, serviceRoleKey, {
+  client = createClient(url, secretKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return client;

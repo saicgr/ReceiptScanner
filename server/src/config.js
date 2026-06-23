@@ -75,10 +75,16 @@ export const config = {
   // Supabase — durable storage for the Roadmap & Feature-Request feature (the
   // ONLY persistent storage). Optional: when unset, those endpoints degrade
   // (GET /roadmap returns curated items at zero votes; writes return 503).
-  // Uses the SERVICE ROLE key, which bypasses RLS — server-only, never shipped.
+  //
+  // Uses a SECRET (server-side) key, which bypasses RLS — server-only, never
+  // shipped. Supabase's modern key is `sb_secret_...` (SUPABASE_SECRET_KEY); the
+  // legacy `service_role` JWT is deprecated but still accepted as a fallback.
   supabase: {
     url: process.env.SUPABASE_URL || '',
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    secretKey:
+      process.env.SUPABASE_SECRET_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      '',
   },
 
   // Inbound email: shared secret so only your mail provider's webhook can post.

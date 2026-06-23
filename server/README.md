@@ -116,9 +116,9 @@ Authed. Body: `{ "title": "…", "description": "…", "category": "…"? }`. St
 
 ## Roadmap & feature-request storage (Supabase — optional)
 
-These three routes are the **only** persistent storage. They hold roadmap upvotes and private feature-request text — never receipts; devices are stored as a `sha256` hash. The feature degrades gracefully: without `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `GET /roadmap` still serves the curated list at zero votes and the write routes return `503`.
+These three routes are the **only** persistent storage. They hold roadmap upvotes and private feature-request text — never receipts; devices are stored as a `sha256` hash. The feature degrades gracefully: without `SUPABASE_URL` + `SUPABASE_SECRET_KEY`, `GET /roadmap` still serves the curated list at zero votes and the write routes return `503`.
 
-To enable: create a free [Supabase](https://supabase.com) project, run this in the SQL editor, then set the two env vars (use the **service-role** key — it bypasses RLS, so keep it server-only):
+To enable: create a [Supabase](https://supabase.com) project, run this in the SQL editor, then set the two env vars. Use a **secret key** — the modern `sb_secret_...` from *Project Settings → API keys → Secret keys* (the legacy `service_role` JWT also works via `SUPABASE_SERVICE_ROLE_KEY`). It bypasses RLS, so keep it server-only:
 
 ```sql
 create table feature_requests (
@@ -165,7 +165,7 @@ Copy `.env.example` → `server/.env` (the loader also falls back to the repo-ro
 | `GLOBAL_DAILY_GEMINI_CAP` | no | `2000` | Billing circuit breaker: total Gemini calls/day across ALL routes (429 once spent). |
 | `FEATURE_REQUESTS_PER_DAY` | no | `10` | Anti-spam cap on `/feature-requests` per device per day. |
 | `SUPABASE_URL` | no | _(empty = roadmap votes/submit disabled)_ | Supabase project URL for roadmap/feature-request storage. |
-| `SUPABASE_SERVICE_ROLE_KEY` | no | _(empty)_ | Supabase **service-role** key (bypasses RLS). Server-only — never ship it. |
+| `SUPABASE_SECRET_KEY` | no | _(empty)_ | Supabase **secret** key (`sb_secret_...`, or legacy `SUPABASE_SERVICE_ROLE_KEY`). Bypasses RLS — server-only, never ship it. |
 | `INBOUND_EMAIL_SECRET` | **yes in production** | _(empty = open in dev, **503 in production**)_ | Shared secret the mail webhook must present (`X-Inbound-Secret` header preferred; `?secret=` only for providers that can't set headers). Generate with `openssl rand -hex 32`. |
 | `FORWARDING_DOMAIN` | no | `inbox.receiptsnap.app` | Domain in minted addresses: `user-<token>@<FORWARDING_DOMAIN>`. |
 | `PENDING_TTL_MS` | no | `259200000` (72 h) | How long un-acked email receipts live in the in-memory queue. |
