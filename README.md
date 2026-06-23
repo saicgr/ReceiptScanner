@@ -44,15 +44,18 @@ ReceiptSnap was designed by going through real user complaints about a popular c
 - A shared, opinionated **UI kit** in `src/components/ui` (compose only from it)
 - **expo-sqlite** — local, offline-first database (`src/db`)
 - On-device OCR: **`@react-native-ml-kit/text-recognition`** (requires a dev build — see below)
-- Imaging: **expo-camera**, **expo-image-picker**, **expo-image-manipulator**, **expo-document-picker** (incl. multi-page PDFs)
+- Imaging: **expo-camera**, **expo-image-picker**, **expo-image-manipulator**, **expo-document-picker**. Multi-page PDFs are supported: page count is read on-device, but true page-to-image rasterisation needs a native renderer (not in the managed workflow), so PDF pages are parsed by the backend (Gemini reads every page) — the original PDF is always kept and viewable.
 - **expo-notifications** (warranty/return reminders), **expo-location** (mileage), **expo-print** + **expo-sharing** (exports), **expo-auth-session** (cloud backup OAuth), **react-native-iap** (one-time unlock)
 - Gestures/animation: **react-native-gesture-handler**, **react-native-reanimated**
 
 **Backend (`server/`)** — a deliberately thin proxy
 
-- **Node ≥ 18**, **Express 4**, **multer** (inbound-email attachments), **cors**, **dotenv**
+- **Node ≥ 18**, **Express 4**, **multer** (inbound-email attachments), **dotenv**, **@supabase/supabase-js** (roadmap votes / feature requests only — never receipts)
 - Calls **Gemini Flash-Lite** (`gemini-3.1-flash-lite`) via the Google Generative Language REST API
-- Stateless except an in-memory per-device rate counter and a short-lived pending queue
+- **Device-token auth** on every money/data endpoint: `X-Device-Id` + `X-Device-Token` (= `HMAC-SHA256(deviceId, DEVICE_TOKEN_SECRET)`), minted at `POST /device/register`. No CORS (native clients + mail webhook only).
+- Endpoints: `/health`, `/device/register`, `/forwarding-address`, `/extract`, `/detect-receipts`, `/summarize`, `/inbound-email`, `/pending`(+`/ack`), `/roadmap`(+`/:id/vote`), `/feature-requests`, `/limits`.
+- Rate limits: 50 scans/day/device + 5000 lifetime soft cap, per-IP backstops, and a service-wide daily Gemini cap (billing circuit breaker) that refunds on failures. A bounded LRU extraction cache avoids re-paying for identical re-scans.
+- Stateless except in-memory rate counters, the extraction cache, and a short-lived pending queue.
 - See **[`server/README.md`](server/README.md)** for endpoints, env vars, the live E2E test, and Render deployment.
 
 > The single source of truth for every module's API is **[`docs/AGENT_CONTRACTS.md`](docs/AGENT_CONTRACTS.md)** — read it before changing any module.
@@ -193,8 +196,10 @@ ReceiptSnap is OCR-first, then AI-structured, then **human-confirmed**:
         │        (returns empty text gracefully on web / Expo Go)
         ▼
  services/extractClient.ts  ── POST {apiBaseUrl}/extract
-        │   body: { ocrText, imageBase64, imageMimeType, preferredDateFormat }
-        │   header: X-Device-Id (from getDeviceId())
+        │   body: { ocrText, imageBase64, imageMimeType, preferredDateFormat, categoryHints }
+        │   headers: X-Device-Id + X-Device-Token (device-token auth; see below)
+        │   cache: identical re-scans short-circuit to a local persisted cache
+        │          (no network, no scan budget); server keeps a bounded LRU too
         ▼
  YOUR proxy (server/)  ── calls Gemini Flash-Lite with OCR text + image
         │   returns: { vendor, date, date_confidence, date_ambiguous, date_options,
@@ -231,7 +236,7 @@ Scan gating uses `useSettings().canScan()` / `scansRemaining()`; the count is in
 - **No server-side storage of your receipts.** The proxy is stateless: it forwards an extraction request to Gemini and returns the result. Email-forwarded receipts sit in a short-lived, in-memory pending queue only until your app pulls them, then they're gone.
 - **Your cloud, your keys.** Backups go to **your own** Google Drive / OneDrive via OAuth — not to us.
 - **No banking connections.** Statement matching is local CSV import only; no credentials are ever requested or stored.
-- **Low operating cost by design.** OCR, mileage GPS, reminders, exports, and matching all run **on-device**. The only paid call is a single Gemini Flash-Lite extraction per scan, rate-limited per device (50/day, 5000 lifetime soft cap) to prevent API-cost abuse.
+- **Low operating cost by design.** OCR, mileage GPS, reminders, exports, and matching all run **on-device**. The only paid call is a single Gemini Flash-Lite extraction per scan, rate-limited per device (50/day, 5000 lifetime soft cap) plus a service-wide daily cap to prevent API-cost abuse. Identical re-scans are served from a cache (client + server) so they never re-pay for Gemini, and failed extractions refund their budget slot.
 
 ---
 

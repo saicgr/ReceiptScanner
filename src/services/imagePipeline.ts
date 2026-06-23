@@ -408,22 +408,84 @@ export async function autoCropHint(
 }
 
 /**
+ * Count the pages in a PDF by scanning its raw bytes for page objects — a pure,
+ * dependency-free parse that needs NO renderer. We count `/Type /Page` markers
+ * (tolerating arbitrary whitespace) but exclude `/Type /Pages` (the page-tree
+ * node). This is heuristic: it can miss pages in object-stream-compressed
+ * (PDF 1.5+) files, so it's a best-effort lower bound, defaulting to 1.
+ *
+ * Exported for unit testing.
+ */
+export function countPdfPages(pdfText: string): number {
+  if (!pdfText) return 1;
+  // Match "/Type /Page" but not "/Type /Pages". The negative lookahead after
+  // "Page" rejects the trailing "s" of the page-tree node.
+  const matches = pdfText.match(/\/Type\s*\/Page(?![a-zA-Z])/g);
+  const n = matches ? matches.length : 0;
+  return n > 0 ? n : 1;
+}
+
+/**
+ * Rasterise a PDF's pages to images for on-device OCR.
+ *
+ * HONEST STATUS — PARTIAL (no true on-device rasterisation). Rendering PDF page
+ * content to a bitmap requires a native PDF renderer (pdfium / PDFKit) or a
+ * WebView+pdf.js bridge; none ship in this managed Expo app (no
+ * react-native-webview, no expo-gl, no native pdf module), and adding one means
+ * a heavy native dependency + custom config plugin + dev-build change that is
+ * out of scope here. `expo-image-manipulator` cannot decode PDF input either.
+ *
+ * What this DOES do honestly:
+ *   - Determines the real page count from the PDF bytes (`countPdfPages`).
+ *   - Returns the PDF uri itself as the single rasterised "page" with
+ *     `rasterized:false`, so callers know on-device OCR will be empty and that
+ *     extraction must rely on the backend (Gemini reads every PDF page
+ *     server-side). The original PDF is still stored and viewable.
+ *
+ * When a native rasteriser is later added, this is the ONE place to expand
+ * `pageImageUris` to one real image per page; the return shape already fits.
+ *
+ * @returns `{ uri, pageImageUris, pageCount, rasterized }`.
+ */
+export async function rasterizePdf(
+  uri: string,
+): Promise<{ uri: string; pageImageUris: string[]; pageCount: number; rasterized: boolean }> {
+  let pageCount = 1;
+  try {
+    // Read enough of the PDF to count pages. PDFs are latin1/binary; reading as
+    // UTF-8 still preserves the ASCII "/Type /Page" markers we look for.
+    const text = await FileSystem.readAsStringAsync(uri).catch(() => '');
+    pageCount = countPdfPages(text);
+  } catch {
+    pageCount = 1;
+  }
+  // No on-device renderer available — the PDF itself is the single logical page.
+  return { uri, pageImageUris: [uri], pageCount, rasterized: false };
+}
+
+/**
  * Import a PDF (e.g. an emailed e-receipt or a scanned multi-page document).
  *
  * Honest limitation: rasterising PDF pages to images needs a native PDF
  * renderer (e.g. PDFKit / pdfium), which Expo Go and our managed workflow don't
- * provide. We therefore keep the multi-page contract but return the PDF uri
- * itself as a single logical "page". Downstream:
+ * provide — see `rasterizePdf` for the full status. We therefore keep the
+ * multi-page contract but return the PDF uri itself as a single logical "page",
+ * now annotated with the REAL page count parsed from the bytes. Downstream:
  *   - OCR (`runOcr`) treats it as an unreadable image and returns empty text,
  *     so extraction relies on the backend, which CAN parse PDFs server-side.
  *   - The original PDF is still stored and viewable/shareable.
  * When a native rasteriser is added, expand `pageUris` to one image per page;
- * the `{ uri, pageUris }` shape already accommodates that.
+ * the `{ uri, pageUris, pageCount }` shape already accommodates that.
  *
- * @returns  `{ uri, pageUris }` for the picked PDF, or `null` if the user
- *           cancels / the picker is unavailable.
+ * @returns  `{ uri, pageUris, pageCount, rasterized }` for the picked PDF, or
+ *           `null` if the user cancels / the picker is unavailable.
  */
-export async function importPdf(): Promise<{ uri: string; pageUris: string[] } | null> {
+export async function importPdf(): Promise<{
+  uri: string;
+  pageUris: string[];
+  pageCount: number;
+  rasterized: boolean;
+} | null> {
   try {
     const result = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
@@ -435,9 +497,9 @@ export async function importPdf(): Promise<{ uri: string; pageUris: string[] } |
     const asset = result.assets?.[0];
     if (!asset?.uri) return null;
 
-    // Single logical page == the PDF itself. See the limitation note above for
-    // why we don't (yet) split into per-page images on-device.
-    return { uri: asset.uri, pageUris: [asset.uri] };
+    // Attempt rasterisation (currently page-count only — see rasterizePdf).
+    const { pageImageUris, pageCount, rasterized } = await rasterizePdf(asset.uri);
+    return { uri: asset.uri, pageUris: pageImageUris, pageCount, rasterized };
   } catch {
     // DocumentPicker unavailable (web/test) or user-environment error.
     return null;

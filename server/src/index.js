@@ -35,6 +35,7 @@ import {
   deviceActionCheckAndConsume,
 } from './rateLimit.js';
 import { handleInboundEmail, verifyInboundSecret } from './inboundEmail.js';
+import { extractRequestKey, getCached, setCached } from './extractCache.js';
 import { list as listPending, ack as ackPending } from './pendingStore.js';
 import { ROADMAP_ITEMS, ROADMAP_BY_ID, UPDATED_AT as ROADMAP_UPDATED_AT } from './roadmapData.js';
 import {
@@ -135,6 +136,29 @@ app.post('/extract', jsonImage, requireDeviceAuth, async (req, res) => {
   if (!ipLimit.ok) {
     return res.status(ipLimit.status).json({ error: ipLimit.reason, message: ipLimit.message });
   }
+
+  // Server-side extraction cache (TASK 33, defense-in-depth). A hit on identical
+  // content returns the cached extraction WITHOUT a Gemini call and WITHOUT
+  // touching the per-device or global budget — so retry storms / many devices
+  // scanning the same e-receipt can't burn the billing circuit breaker. The
+  // per-IP backstop above still applies as a raw request-rate guard.
+  const cacheKey = extractRequestKey({
+    ocrText,
+    imageBase64,
+    imageMimeType,
+    preferredDateFormat,
+    categoryHints,
+  });
+  if (cacheKey) {
+    const hit = getCached(cacheKey);
+    if (hit) {
+      return res.json({
+        ...hit,
+        _meta: { ...peek(req.deviceId), model: config.gemini.model, cached: true },
+      });
+    }
+  }
+
   const limit = checkAndConsume(req.deviceId);
   if (!limit.ok) {
     return res.status(limit.status).json({
@@ -156,6 +180,7 @@ app.post('/extract', jsonImage, requireDeviceAuth, async (req, res) => {
       preferredDateFormat,
       categoryHints: Array.isArray(categoryHints) ? categoryHints.slice(0, 40) : undefined,
     });
+    if (cacheKey) setCached(cacheKey, result);
     res.json({
       ...result,
       _meta: {

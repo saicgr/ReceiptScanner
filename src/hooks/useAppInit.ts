@@ -9,6 +9,7 @@ import { useSettings } from '../store/settings';
 import { useLookups } from '../store/lookups';
 import { loadAppFonts } from './useFonts';
 import { seedDemoReceipts } from '../db/demoSeed';
+import { runCacheImageMigrationOnce } from '../services/cacheImageMigration';
 
 export function useAppInit(): { ready: boolean; error: string | null } {
   const [ready, setReady] = useState(false);
@@ -23,6 +24,10 @@ export function useAppInit(): { ready: boolean; error: string | null } {
         await loadAppFonts(); // VAULT type families (resolves even on failure)
         await getDb(); // runs migrations + seed (sql.js on web, native otherwise)
         await Promise.all([loadSettings(), refreshLookups()]);
+        // One-time: re-persist any receipt images still pointing at the
+        // OS-purgeable cache directory into permanent storage (TASK 35). Guarded
+        // by a settings flag so it runs at most once; best-effort, never blocks.
+        await runCacheImageMigrationOnce();
         // Dev-only: a console hook to populate demo receipts for previewing the
         // UI with content. No-ops if any receipts already exist. Never shipped
         // behaviour — guarded by __DEV__.

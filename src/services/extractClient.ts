@@ -23,6 +23,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { appConfig } from '@/lib/config';
 import { getDeviceId } from '@/lib/device';
 import { disambiguate } from '@/lib/dates';
+import { extractCacheKey } from '@/lib/extractCacheKey';
+import { getCachedExtraction, setCachedExtraction } from './extractCache';
 import { getSetting, setSetting } from '@/db/settings';
 import { listCategories } from '@/db/categories';
 import type {
@@ -368,6 +370,23 @@ export async function extractReceipt(args: {
     return localExtractFallback(ocrText);
   }
 
+  // Extraction cache (TASK 33): re-scanning the SAME receipt should not re-pay
+  // for a Gemini call. The key is a stable fingerprint of everything that can
+  // change the output (image bytes + OCR text + mime + date format + hints). A
+  // hit short-circuits the network round-trip AND the server-side scan budget.
+  const cacheKey = extractCacheKey({
+    imageBase64,
+    ocrText,
+    imageMimeType: mimeType,
+    preferredDateFormat,
+    categoryHints,
+  });
+  const cached = await getCachedExtraction(cacheKey);
+  if (cached) {
+    if (__DEV__) console.log('[extractClient] cache hit; skipping /extract');
+    return cached;
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -404,7 +423,11 @@ export async function extractReceipt(args: {
     }
 
     const json = (await response.json()) as unknown;
-    return normalizeResult(json);
+    const result = normalizeResult(json);
+    // Cache only REAL proxy results (never the offline heuristic) so an
+    // identical re-scan is free next time. Best-effort, fire-and-forget.
+    void setCachedExtraction(cacheKey, result);
+    return result;
   } catch (err) {
     // Network down, DNS failure, timeout/abort, or JSON parse error.
     if (__DEV__) {

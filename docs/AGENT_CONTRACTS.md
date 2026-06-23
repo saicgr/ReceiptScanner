@@ -29,6 +29,32 @@ This file pins the exact module APIs so independently-built files integrate. **F
 
 ---
 
+# BACKEND API CONTRACT (`server/`) — current truth
+
+Thin Express proxy (`server/src/index.js`). Stateless except in-memory rate counters, the bounded extraction LRU cache, and the ephemeral pending queue. **No user receipts are persisted server-side** (the ONLY durable store is Supabase, used solely for Roadmap votes + feature requests). No CORS middleware (native clients + mail webhook only).
+
+**Auth.** Every endpoint that costs money or exposes user data requires BOTH headers `X-Device-Id` + `X-Device-Token` (`requireDeviceAuth`), where `X-Device-Token = HMAC-SHA256(deviceId, DEVICE_TOKEN_SECRET)`. Verification is stateless. An invalid pair → `401`. Mint a token via `POST /device/register` (per-IP rate-limited). `/inbound-email` is gated by a separate shared secret, not device auth.
+
+**Endpoints**
+- `GET  /health` — liveness + `{ ok, service, model, geminiConfigured, time }`. No auth.
+- `POST /device/register` `{ deviceId }` → `{ deviceToken }`. Per-IP daily cap (`REGISTER_PER_DAY_PER_IP`, default 10).
+- `GET  /forwarding-address` (authed) → `{ token, address }` (`user-<token>@<FORWARDING_DOMAIN>`), token = `sha256(deviceId)[:10]`.
+- `POST /extract` (authed) `{ ocrText, imageBase64, imageMimeType, preferredDateFormat, categoryHints }` → `ExtractionResult` + `_meta`. Validates first (bad body never burns a scan). **Order:** per-IP cap → **server cache check (hit returns `_meta.cached:true`, no budget spent)** → per-device scan cap → global daily cap. Refunds the device scan + global slot on Gemini 5xx/timeout. Caches successful results (bounded LRU, `server/src/extractCache.js`).
+- `POST /detect-receipts` (authed) `{ imageBase64, imageMimeType }` → `{ count, regions[] }`. Billed like /extract (per-IP + per-device scan + global cap, refunds on 5xx/timeout). Optional "Refine with AI".
+- `POST /summarize` (authed) `{ receipt }` → `{ summary }`. Billed Gemini call but NOT a "scan" (per-IP + global cap only; global refund on 5xx/timeout).
+- `POST /inbound-email` (shared-secret) — JSON or multipart (SendGrid Parse). Runs each attachment/body through the same pipeline into the pending queue; caps 3 attachments/email; draws on the global daily cap and **refunds the global slot when a Gemini call fails (TASK 37)**. In production an unset `INBOUND_EMAIL_SECRET` returns `503`.
+- `GET  /pending` (authed) → `{ token, items }`. `POST /pending/ack` (authed) `{ ids }` → `{ ok, removed }`.
+- `GET  /roadmap` (authed) → `{ updatedAt, items:[{...curated, upvotes, voted}] }`. Reads degrade to 0 votes when Supabase is down.
+- `POST /roadmap/:id/vote` (authed) → `{ id, voted, upvotes }`. Shipped items 400; storage down → 503.
+- `POST /feature-requests` (authed) `{ title, description?, category? }` → `{ ok, id }`. Per-device daily cap (`FEATURE_REQUESTS_PER_DAY`, default 10).
+- `GET  /limits` (authed) → `{ remainingToday, lifetimeRemaining }` (no consume).
+
+**Rate limits / billing circuit breaker** (`server/src/rateLimit.js`): per-device `RATE_LIMIT_PER_DAY` (default 50/day) + `RATE_LIMIT_LIFETIME` soft cap (default 5000); per-IP backstops on register/extract; a service-wide `GLOBAL_DAILY_GEMINI_CAP` (default 2000) across ALL Gemini routes. All counter maps are bounded (LRU eviction) to cap memory.
+
+**Env vars** (`server/src/config.js`): `PORT` (8787); `GEMINI_API_KEY` (required to actually extract), `GEMINI_MODEL` (gemini-3.1-flash-lite via env / default), `GEMINI_BASE_URL`; `DEVICE_TOKEN_SECRET` (**required in production — refuses to boot without it**); `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_LIFETIME`, `REGISTER_PER_DAY_PER_IP`, `EXTRACT_PER_DAY_PER_IP`, `GLOBAL_DAILY_GEMINI_CAP`, `FEATURE_REQUESTS_PER_DAY`; `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (optional — roadmap/feature-request storage; degrade gracefully when unset); `INBOUND_EMAIL_SECRET`, `FORWARDING_DOMAIN` (inbox.receiptsnap.app), `PENDING_TTL_MS`.
+
+---
+
 # SERVICES TO BUILD (`src/services/*`) — exact signatures
 
 ### `src/services/ocr.ts`
@@ -36,9 +62,11 @@ On-device OCR. Use `@react-native-ml-kit/text-recognition` (TextRecognition.reco
 - `export async function runOcr(imageUri: string): Promise<OcrResult>` (OcrResult from `@/types`: `{ text, blocks }`).
 
 ### `src/services/extractClient.ts`
-Calls backend `POST /extract`. Base URL from `appConfig.apiBaseUrl` (`@/lib/config`). Sends header `X-Device-Id` (from `getDeviceId()` in `@/lib/device`), body `{ ocrText, imageBase64, imageMimeType, preferredDateFormat }`. Image read via `expo-file-system` `readAsStringAsync(uri,{encoding:'base64'})`. On network failure, fall back to a local heuristic using OCR text (`localExtractFallback`).
-- `export async function extractReceipt(args: { imageUri?: string; ocrText?: string; imageMimeType?: string }): Promise<ExtractionResult>`
+Calls backend `POST /extract`. Base URL from `appConfig.apiBaseUrl` (`@/lib/config`). **Device-token auth** (the bare `X-Device-Id` is no longer trusted by the server): the device registers ONCE via `POST /device/register` and then presents BOTH `X-Device-Id` (from `getDeviceId()` in `@/lib/device`) and `X-Device-Token` (= `HMAC-SHA256(deviceId, server secret)`, persisted in the settings DB under the internal `device_token` key) on every authed call. `authedFetch(url, init)` attaches these headers, transparently re-registers + retries ONCE on `401`, and is the wrapper every proxy call must use. Body `{ ocrText, imageBase64, imageMimeType, preferredDateFormat, categoryHints }`. Image read via `expo-file-system` `readAsStringAsync(uri,{encoding:'base64'})`. On ANY network failure / non-2xx, fall back to a local heuristic using OCR text (`localExtractFallback`).
+- **Extraction cache (TASK 33):** before calling the proxy, an identical request (same image bytes + OCR text + mime + date format + category hints, via `extractCacheKey` in `@/lib/extractCacheKey`) short-circuits to a persisted client cache (`src/services/extractCache.ts`, AsyncStorage, bounded LRU + TTL) — no network, no scan budget. Only REAL proxy results are cached (never the offline fallback). The server also keeps a bounded in-memory LRU as defense-in-depth (`server/src/extractCache.js`): a hit returns the cached extraction with `_meta.cached:true` and does NOT consume the per-device or global Gemini budget.
+- `export async function extractReceipt(args: { imageUri?: string; imageBase64?: string|null; ocrText?: string; imageMimeType?: string; categoryHints?: string[] }): Promise<ExtractionResult>`
 - `export function localExtractFallback(ocrText: string): ExtractionResult` (best-effort; vendor=first line, find a total via regex, currency guess, low confidence, empty line_items). Use `disambiguate` from `@/lib/dates` for any date found.
+- `export async function authedFetch(url, init?): Promise<Response>`, `getDeviceToken(forceRegister?)`, `getDeviceAuthHeaders(forceRegister?)`.
 - Returns `ExtractionResult` (from `@/types`).
 
 ### `src/services/receiptService.ts`
@@ -53,7 +81,7 @@ Capture/import + crop/enhance + PDF + stitching. Use expo-image-picker, expo-ima
 - `export async function pickFromGallery(opts?:{multiple?:boolean}): Promise<string[]>` (uris)
 - `export async function enhanceImage(uri: string): Promise<string>` — resize (max 2000px) + modest contrast; return new uri. (ImageManipulator)
 - `export async function autoCropHint(uri: string): Promise<string>` — placeholder that returns enhanceImage result (document edge detection requires native; keep API).
-- `export async function importPdf(): Promise<{ uri: string; pageUris: string[] } | null>` — pick a PDF (DocumentPicker); for page rendering, if not feasible on-device just return the pdf uri as a single "page" and note it. Keep multi-page contract: `pageUris` array.
+- `export async function importPdf(): Promise<{ uri: string; pageUris: string[]; pageCount: number; rasterized: boolean } | null>` — pick a PDF (DocumentPicker). True on-device rasterisation is NOT achievable with the managed tooling (no native pdf renderer / WebView / expo-gl; `expo-image-manipulator` can't decode PDFs), so `rasterized` is `false` and `pageUris` is the PDF uri as a single logical page. The REAL `pageCount` is parsed from the PDF bytes (`countPdfPages`). Extraction relies on the backend, which reads every PDF page server-side. See `rasterizePdf(uri)` and `countPdfPages(text)` (pure, unit-tested) — the single place to expand to per-page images if a native rasteriser is ever added (TASK 36, PARTIAL).
 - `export async function stitchImages(uris: string[]): Promise<string>` — vertically combine multiple photos of ONE long receipt into a single tall image. Implement via a best-effort approach: if a real stitch isn't possible without native canvas, return the first uri and store all as page images (document the limitation in comments). Prefer using `expo-image-manipulator` to at least normalize widths.
 - `export async function saveImageWithName(srcUri: string, filename: string): Promise<string>` — copy to `${FileSystem.documentDirectory}receipts/${filename}` (mkdir if needed), return new uri.
 - `export const RECEIPTS_DIR: string`.
@@ -92,10 +120,10 @@ One-time IAP unlock (use `react-native-iap`; product id `appConfig.iapProductId`
 - Wrap all react-native-iap calls in try/catch; on simulators return a clear message. Never crash.
 
 ### `src/services/emailIngestService.ts`
-Poll backend `/pending` for email-forwarded receipts.
-- `export async function fetchForwardingAddress(): Promise<{ token:string; address:string }>` — GET `${apiBase}/forwarding-address?deviceId=…`; persist to settings (`forwarding_token`,`forwarding_address`).
-- `export async function pollPending(): Promise<{ id:string; extraction:ExtractionResult; imageBase64:string|null; imageMimeType:string|null }[]>` — GET `/pending?token=…`.
-- `export async function ackPending(ids:string[]): Promise<void>` — POST `/pending/ack`.
+Poll backend `/pending` for email-forwarded receipts. All calls go through `authedFetch` (X-Device-Id + X-Device-Token); the server derives the forwarding token server-side from the authenticated device id, so NO `?token=`/`?deviceId=` query params are sent any more.
+- `export async function fetchForwardingAddress(): Promise<{ token:string; address:string }>` — GET `${apiBase}/forwarding-address`; persist to settings (`forwarding_token`,`forwarding_address`).
+- `export async function pollPending(): Promise<{ id:string; extraction:ExtractionResult; imageBase64:string|null; imageMimeType:string|null }[]>` — GET `/pending`.
+- `export async function ackPending(ids:string[]): Promise<void>` — POST `/pending/ack` `{ ids }`.
 
 ### `src/services/protectionsService.ts`
 Compute the Protections tab list from DB.

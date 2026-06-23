@@ -519,6 +519,13 @@ export interface AppSettings {
   // ---- V7: AI receipt summary (TASK 19) ----
   /** Opt-in one-line AI summary via the existing Gemini proxy (cloud, gated). */
   ai_summary_enabled: boolean;
+  // ---- Maintenance flags ----
+  /**
+   * Set once the one-time migration that re-persists receipt images off the
+   * OS-purgeable cache directory into permanent storage has run (TASK 35). Guards
+   * the migration so it never re-runs on every launch.
+   */
+  cache_image_migration_done: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -547,6 +554,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voice_enabled: false,
   report_config: DEFAULT_REPORT_CONFIG,
   ai_summary_enabled: false,
+  cache_image_migration_done: false,
 };
 
 // ---------------------------------------------------------------------------

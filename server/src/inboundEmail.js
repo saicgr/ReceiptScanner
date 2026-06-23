@@ -12,7 +12,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { extractReceipt } from './gemini.js';
 import { enqueue } from './pendingStore.js';
-import { globalCheckAndConsume } from './rateLimit.js';
+import { globalCheckAndConsume, globalRefund } from './rateLimit.js';
 import { config } from './config.js';
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
@@ -77,12 +77,22 @@ export async function handleInboundEmail(email, preferredDateFormat = 'MM/DD/YYY
         throw err;
       }
       const isImage = IMAGE_TYPES.includes(att.contentType);
-      const extraction = await extractReceipt({
-        ocrText: `${email.subject || ''}\n${email.text || ''}`.trim(),
-        imageBase64: att.contentBase64,
-        imageMimeType: att.contentType,
-        preferredDateFormat,
-      });
+      let extraction;
+      try {
+        extraction = await extractReceipt({
+          ocrText: `${email.subject || ''}\n${email.text || ''}`.trim(),
+          imageBase64: att.contentBase64,
+          imageMimeType: att.contentType,
+          preferredDateFormat,
+        });
+      } catch (err) {
+        // The Gemini call failed — give the global daily slot back so a failure
+        // doesn't permanently burn a billing-budget slot (mirrors /extract).
+        if (!err.status || err.status >= 500) globalRefund();
+        // Skip this attachment but keep processing the rest of the email.
+        console.warn(`[inbound-email] extraction failed for attachment: ${err.message}`);
+        continue;
+      }
       ids.push(
         enqueue(token, {
           extraction,
@@ -100,10 +110,18 @@ export async function handleInboundEmail(email, preferredDateFormat = 'MM/DD/YYY
       err.status = budget.status;
       throw err;
     }
-    const extraction = await extractReceipt({
-      ocrText: `${email.subject || ''}\n${email.text || ''}`.trim(),
-      preferredDateFormat,
-    });
+    let extraction;
+    try {
+      extraction = await extractReceipt({
+        ocrText: `${email.subject || ''}\n${email.text || ''}`.trim(),
+        preferredDateFormat,
+      });
+    } catch (err) {
+      // Refund the global slot on a server-side Gemini failure (mirrors /extract)
+      // so a failed body-only parse doesn't permanently burn a budget slot.
+      if (!err.status || err.status >= 500) globalRefund();
+      throw err;
+    }
     ids.push(enqueue(token, { extraction, source: 'email' }));
   }
 
