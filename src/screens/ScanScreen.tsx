@@ -251,6 +251,14 @@ export default function ScanScreen() {
         <Button title="Import PDF" icon="document-outline" variant="secondary" style={{ flex: 1 }} onPress={onPdf} />
       </Row>
 
+      <Button
+        title="Scan QR / e-receipt"
+        icon="qr-code-outline"
+        variant="secondary"
+        style={{ marginTop: t.spacing.md }}
+        onPress={() => router.push('/qr-scanner')}
+      />
+
       {!canScan() ? (
         <EmptyState
           icon="lock-closed-outline"

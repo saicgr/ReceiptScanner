@@ -46,6 +46,8 @@ export default function RootLayout() {
           <Stack.Screen name="review" options={{ headerShown: false }} />
           <Stack.Screen name="multi-scan" options={{ title: 'Multi Scan' }} />
           <Stack.Screen name="split-review" options={{ title: 'Split Receipts' }} />
+          <Stack.Screen name="qr-scanner" options={{ presentation: 'fullScreenModal', headerShown: false }} />
+          <Stack.Screen name="share-qr" options={{ headerShown: false }} />
           <Stack.Screen name="receipt/[id]" options={{ headerShown: false }} />
           <Stack.Screen name="folder/[id]" options={{ headerShown: false }} />
           <Stack.Screen name="image-viewer" options={{ presentation: 'fullScreenModal', headerShown: false }} />

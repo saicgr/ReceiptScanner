@@ -251,6 +251,7 @@ export default function ReceiptDetailScreen() {
                   <RNText style={{ color: '#08311F', fontFamily: fonts.sansBold, fontSize: 12 }}>Pending</RNText>
                 </View>
               ) : null}
+              <HeroCircle icon="qr-code-outline" onPress={() => router.push({ pathname: '/share-qr', params: { id: r.id } })} label="Share via QR" />
               <HeroCircle icon="share-outline" onPress={onShareOriginal} label="Share original image" />
               <HeroCircle icon="trash-outline" onPress={onDelete} label="Delete receipt" />
             </Row>
