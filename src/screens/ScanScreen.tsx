@@ -32,6 +32,7 @@ import {
   toBase64,
 } from '@/services/imagePipeline';
 import { processImage } from '@/services/batchService';
+import { getCurrentCoords } from '@/services/locationService';
 import { detectReceiptRegions } from '@/services/receiptDetect';
 import { extractReceipt } from '@/services/extractClient';
 import { checkDuplicate } from '@/services/receiptService';
@@ -59,8 +60,13 @@ export default function ScanScreen() {
     return true;
   };
 
-  /** Attach EXIF capture metadata + use capture-time as a date fallback. */
-  const applyMeta = (meta: ImageMeta | null) => {
+  /**
+   * Attach EXIF capture metadata + use capture-time as a date fallback. When the
+   * photo carries no EXIF GPS and the user has opted in to location tagging
+   * (TASK 46), fall back to a current device-location fix. Geotagging is gated
+   * behind the Settings toggle and degrades gracefully on permission denial.
+   */
+  const applyMeta = async (meta: ImageMeta | null) => {
     if (!meta) return;
     const d = useDraft.getState();
     const patch: Record<string, unknown> = {
@@ -72,6 +78,15 @@ export default function ScanScreen() {
     if (!d.date && meta.capturedAt) {
       patch.date = meta.capturedAt.slice(0, 10);
       patch.date_options = [meta.capturedAt.slice(0, 10)];
+    }
+    // No EXIF coordinates but the user wants receipts geotagged → read the
+    // current device location (opt-in, permission-gated, best-effort).
+    if (settings.geotag_receipts && meta.lat == null && meta.lng == null) {
+      const coords = await getCurrentCoords();
+      if (coords) {
+        patch.captured_lat = coords.lat;
+        patch.captured_lng = coords.lng;
+      }
     }
     d.patch(patch);
   };
@@ -151,7 +166,7 @@ export default function ScanScreen() {
         source,
         imageFormat: settings.image_format,
       });
-      applyMeta(meta);
+      await applyMeta(meta);
       await detectAndApplyPayment(ocrText);
       const dup = await checkDuplicate();
       if (dup) setDuplicate(dup.id, dup.score);

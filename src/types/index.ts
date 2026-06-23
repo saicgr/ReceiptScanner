@@ -427,6 +427,12 @@ export interface AppSettings {
    */
   enhance_deskew: boolean;
   app_lock: boolean; // require biometric/PIN to open History & Statistics
+  /**
+   * Tag receipts with where they were captured. Uses the photo's EXIF GPS when
+   * present; otherwise falls back to the current device location (requires a
+   * foreground-location grant). OFF by default for privacy — the user opts in.
+   */
+  geotag_receipts: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -450,6 +456,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   auto_crop: true,
   enhance_deskew: true,
   app_lock: false,
+  geotag_receipts: false, // privacy-first: location tagging is opt-in
 };
 
 // ---------------------------------------------------------------------------

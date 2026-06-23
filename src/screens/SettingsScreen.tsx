@@ -412,6 +412,19 @@ export default function SettingsScreen() {
             />
           }
         />
+        <Divider spacing={0} />
+        <ListRow
+          icon="location-outline"
+          title="Tag receipts with location"
+          subtitle="Save where a receipt was captured (uses photo GPS or your current location)"
+          right={
+            <Switch
+              value={settings.geotag_receipts}
+              onValueChange={(v) => update({ geotag_receipts: v })}
+              trackColor={{ true: t.colors.brand }}
+            />
+          }
+        />
       </Card>
       <Button
         title="Export all as HTML"

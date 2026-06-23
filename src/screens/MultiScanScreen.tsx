@@ -29,6 +29,7 @@ import { useLookups } from '@/store/lookups';
 import { useDraft } from '@/store/draft';
 import { pickReceiptsWithMeta, parseAssetMeta } from '@/services/imagePipeline';
 import { runBatch, processStitchedPages, MAX_BATCH } from '@/services/batchService';
+import { getCurrentCoords, type DeviceCoords } from '@/services/locationService';
 import { persistDraft } from '@/services/receiptService';
 import { listPaymentMethods } from '@/db/paymentMethods';
 import { detectPayment } from '@/lib/paymentDetect';
@@ -150,6 +151,15 @@ export default function MultiScanScreen() {
         paymentMethods = [];
       }
 
+      // Resolve a single device-location fix for the WHOLE batch (TASK 46) when
+      // the user opted in — a batch is captured at one place/time, so we avoid
+      // prompting/fetching per receipt. Only used to fill receipts lacking EXIF
+      // GPS. Best-effort: null when permission is denied or unavailable.
+      let batchCoords: DeviceCoords | null = null;
+      if (settings.geotag_receipts) {
+        batchCoords = await getCurrentCoords();
+      }
+
       let done = 0;
       let limitHit = false;
       for (const r of results) {
@@ -176,13 +186,18 @@ export default function MultiScanScreen() {
           if (detection.brand) draft.applyPaymentDetection(detection);
         }
         // Carry EXIF capture metadata; use capture date if the model found none.
-        if (r.meta) {
+        // When EXIF has no GPS, fall back to the batch device-location fix
+        // (TASK 46, opt-in). Apply even when there's no EXIF block at all.
+        const exifLat = r.meta?.lat ?? null;
+        const exifLng = r.meta?.lng ?? null;
+        const useBatchCoords = batchCoords && exifLat == null && exifLng == null;
+        if (r.meta || useBatchCoords) {
           const cur = useDraft.getState();
           cur.patch({
-            captured_at: r.meta.capturedAt,
-            captured_lat: r.meta.lat,
-            captured_lng: r.meta.lng,
-            ...(!cur.date && r.meta.capturedAt
+            captured_at: r.meta?.capturedAt ?? null,
+            captured_lat: useBatchCoords ? batchCoords!.lat : exifLat,
+            captured_lng: useBatchCoords ? batchCoords!.lng : exifLng,
+            ...(!cur.date && r.meta?.capturedAt
               ? { date: r.meta.capturedAt.slice(0, 10), date_options: [r.meta.capturedAt.slice(0, 10)] }
               : {}),
           });

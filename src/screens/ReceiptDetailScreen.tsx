@@ -7,7 +7,7 @@
  * hydrates the draft and jumps to Review. All data/actions are unchanged.
  */
 import { useCallback, useState } from 'react';
-import { Alert, Linking, Pressable, View, ScrollView, Text as RNText } from 'react-native';
+import { Alert, Linking, Platform, Pressable, View, ScrollView, Text as RNText } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams, Stack } from 'expo-router';
@@ -42,6 +42,7 @@ import { findMatchesForReceipt, dismissMatch } from '@/services/recallService';
 import { cardBenefitHints } from '@/lib/cardBenefits';
 import { formatMoney } from '@/lib/money';
 import { formatDate, relativeDays } from '@/lib/dates';
+import { hasValidCoords, formatCoords, mapsUrl } from '@/lib/maps';
 import type {
   AuditLogEntry,
   Folder,
@@ -237,6 +238,22 @@ export default function ReceiptDetailScreen() {
     }
   };
 
+  // TASK 47 — open the capture location in the device's native maps app.
+  const hasLocation = hasValidCoords(r.captured_lat, r.captured_lng);
+  const onOpenInMaps = async () => {
+    if (!hasLocation) return;
+    const url = mapsUrl(
+      { lat: r.captured_lat!, lng: r.captured_lng! },
+      Platform.OS,
+      r.vendor || null,
+    );
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Open in Maps', 'Could not open a maps app on this device.');
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: t.colors.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -415,6 +432,40 @@ export default function ReceiptDetailScreen() {
           )}
           {r.saved_filename ? (
             <RNText style={{ color: t.colors.textFaint, fontFamily: fonts.sansMedium, fontSize: 11.5, marginTop: t.spacing.sm }} numberOfLines={1}>{r.saved_filename}</RNText>
+          ) : null}
+
+          {/* TASK 47 — capture location. No native map view (react-native-maps
+              isn't bundled); a static coordinate card + Open-in-Maps deep link
+              hands off to the device's own maps app. */}
+          {hasLocation ? (
+            <>
+              <SectionLabel text="Location" />
+              <FieldCard>
+                <Row justify="space-between" align="center">
+                  <Row gap={10} align="center" style={{ flex: 1, paddingRight: t.spacing.sm }}>
+                    <View style={{ width: 36, height: 36, borderRadius: t.radius.md, backgroundColor: t.colors.brandTint, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="location" size={18} color={t.colors.brand} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <RNText style={{ color: t.colors.text, fontFamily: fonts.sansBold, fontSize: 14 }}>
+                        Where it was captured
+                      </RNText>
+                      <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12.5, marginTop: 2 }} numberOfLines={1}>
+                        {formatCoords(r.captured_lat!, r.captured_lng!)}
+                      </RNText>
+                    </View>
+                  </Row>
+                </Row>
+                <Button
+                  title="Open in Maps"
+                  icon="map-outline"
+                  variant="secondary"
+                  size="sm"
+                  style={{ marginTop: t.spacing.md, alignSelf: 'flex-start' }}
+                  onPress={onOpenInMaps}
+                />
+              </FieldCard>
+            </>
           ) : null}
 
           {/* Protections. */}
