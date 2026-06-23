@@ -35,6 +35,8 @@ import { processImage } from '@/services/batchService';
 import { detectReceiptRegions } from '@/services/receiptDetect';
 import { extractReceipt } from '@/services/extractClient';
 import { checkDuplicate } from '@/services/receiptService';
+import { listPaymentMethods } from '@/db/paymentMethods';
+import { detectPayment } from '@/lib/paymentDetect';
 import type { ImageMeta } from '@/types';
 
 export default function ScanScreen() {
@@ -42,6 +44,7 @@ export default function ScanScreen() {
   const { settings, canScan } = useSettings();
   const startFromExtraction = useDraft((s) => s.startFromExtraction);
   const setDuplicate = useDraft((s) => s.setDuplicate);
+  const applyPaymentDetection = useDraft((s) => s.applyPaymentDetection);
 
   const [cameraOpen, setCameraOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -71,6 +74,22 @@ export default function ScanScreen() {
       patch.date_options = [meta.capturedAt.slice(0, 10)];
     }
     d.patch(patch);
+  };
+
+  /**
+   * Auto-detect the payment method/card from OCR text and pre-fill the draft
+   * (TASK 41). Maps against the user's existing payment methods; on no match it
+   * leaves a non-binding suggestion. Best-effort — never blocks the scan.
+   */
+  const detectAndApplyPayment = async (ocrText: string) => {
+    if (!ocrText.trim()) return;
+    try {
+      const methods = await listPaymentMethods();
+      const detection = detectPayment(ocrText, methods);
+      if (detection.brand) applyPaymentDetection(detection);
+    } catch {
+      // Payment detection is a convenience — ignore any failure.
+    }
   };
 
   /**
@@ -122,8 +141,9 @@ export default function ScanScreen() {
   ) => {
     setBusy('Reading & extracting…');
     try {
-      const { uri: enhanced, extraction } = await processImage(uri, {
+      const { uri: enhanced, extraction, ocrText } = await processImage(uri, {
         autoCrop: settings.auto_crop,
+        deskew: settings.enhance_deskew,
       });
       startFromExtraction(extraction, {
         imageUris: [enhanced],
@@ -132,6 +152,7 @@ export default function ScanScreen() {
         imageFormat: settings.image_format,
       });
       applyMeta(meta);
+      await detectAndApplyPayment(ocrText);
       const dup = await checkDuplicate();
       if (dup) setDuplicate(dup.id, dup.score);
       router.replace('/review');

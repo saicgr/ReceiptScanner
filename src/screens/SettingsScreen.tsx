@@ -387,6 +387,20 @@ export default function SettingsScreen() {
         />
         <Divider spacing={0} />
         <ListRow
+          icon="scan-outline"
+          title="Auto-Straighten (De-skew)"
+          subtitle="Straighten slightly crooked photos on-device before reading"
+          right={
+            <Switch
+              value={settings.enhance_deskew}
+              disabled={!settings.auto_crop}
+              onValueChange={(v) => update({ enhance_deskew: v })}
+              trackColor={{ true: t.colors.brand }}
+            />
+          }
+        />
+        <Divider spacing={0} />
+        <ListRow
           icon="lock-closed-outline"
           title="App Lock"
           subtitle="Require biometrics to open History & Statistics"

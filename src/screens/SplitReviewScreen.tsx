@@ -25,6 +25,8 @@ import { detectReceiptRegionsAI } from '@/services/detectClient';
 import { splitImageIntoReceipts } from '@/services/imagePipeline';
 import { runBatch } from '@/services/batchService';
 import { persistDraft } from '@/services/receiptService';
+import { listPaymentMethods } from '@/db/paymentMethods';
+import { detectPayment } from '@/lib/paymentDetect';
 import type { DetectedRegion } from '@/types';
 
 /** Region covering the whole image — fallback when detection finds nothing. */
@@ -153,9 +155,19 @@ export default function SplitReviewScreen() {
         {
           concurrency: 3,
           autoCrop: settings.auto_crop,
+          deskew: settings.enhance_deskew,
           onProgress: (d, total) => setBusy(`Processing ${d}/${total}…`),
         },
       );
+
+      // Load the user's payment methods ONCE for on-device payment auto-detection
+      // across the batch (TASK 41). Best-effort — empty on failure.
+      let paymentMethods: { id: string; name: string }[] = [];
+      try {
+        paymentMethods = await listPaymentMethods();
+      } catch {
+        paymentMethods = [];
+      }
 
       let done = 0;
       let limitHit = false;
@@ -176,6 +188,11 @@ export default function SplitReviewScreen() {
         });
         const cat = categoryIdFor(r.extraction.category);
         if (cat) draft.setField('category_id', cat);
+        // Auto-detect the payment method/card from OCR text (TASK 41).
+        if (r.ocrText) {
+          const detection = detectPayment(r.ocrText, paymentMethods);
+          if (detection.brand) draft.applyPaymentDetection(detection);
+        }
         await persistDraft({ finalize: false }); // saved as pending
         useDraft.getState().reset();
         done++;

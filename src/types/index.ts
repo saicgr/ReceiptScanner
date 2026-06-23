@@ -419,6 +419,13 @@ export interface AppSettings {
   backup_provider: CloudProvider | null;
   /** Competitor-parity extras. */
   auto_crop: boolean; // auto-crop/enhance captures (vs keep original)
+  /**
+   * Apply on-device fine de-skew (straighten a slightly crooked photo by an
+   * arbitrary small angle) as part of the auto-crop/enhance pass. Only takes
+   * effect when `auto_crop` is on. In-plane rotation only — see
+   * `imagePipeline.autoCropHint` for the honest scope of what enhancement does.
+   */
+  enhance_deskew: boolean;
   app_lock: boolean; // require biometric/PIN to open History & Statistics
 }
 
@@ -441,6 +448,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   last_backup_at: null,
   backup_provider: null,
   auto_crop: true,
+  enhance_deskew: true,
   app_lock: false,
 };
 

@@ -446,6 +446,19 @@ export default function ReviewScreen() {
           value={payment?.name ?? 'Not set'}
           onPress={() => setSheet({ kind: 'payment' })}
         />
+        {/* Auto-detected payment suggestion (TASK 41): shown only when we read a
+            card/brand from the receipt but couldn't map it to a user method and
+            the user hasn't picked one yet. Non-binding — tap to open the picker. */}
+        {!d.payment_method_id && d.suggested_payment ? (
+          <Pressable onPress={() => setSheet({ kind: 'payment' })} hitSlop={6}>
+            <Row gap={6} align="center" style={{ marginTop: 2, marginBottom: t.spacing.xs }}>
+              <Icon name="sparkles-outline" size={13} color={t.colors.brand} />
+              <Text variant="caption" color={t.colors.brand}>
+                Detected “{d.suggested_payment}” on this receipt — tap to set it.
+              </Text>
+            </Row>
+          </Pressable>
+        ) : null}
         <Divider spacing={t.spacing.sm} />
 
         {/* Tags (trip / job grouping) — multi-select rendered as chips. */}

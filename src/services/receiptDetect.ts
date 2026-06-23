@@ -19,6 +19,7 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 
 import { clusterBlocksIntoRegions, type BlockFrame } from '@/lib/regions';
+import { deskewRotation } from '@/lib/deskew';
 import type { CropQuality, DetectedRegion } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -111,6 +112,24 @@ export async function detectReceiptRegions(uri: string): Promise<DetectedRegion[
   const [{ frames }, dims] = await Promise.all([recognizeBlocks(uri), probeDimensions(uri)]);
   if (!dims || frames.length === 0) return [];
   return clusterBlocksIntoRegions(frames, dims.width, dims.height);
+}
+
+/**
+ * Estimate the SMALL skew angle (in degrees) a receipt is tilted by, for
+ * fine de-skew/straightening. Reuses the free ML Kit text-block frames and the
+ * pure `deskewRotation` line-fit math. Returns the corrective rotation
+ * (clockwise-positive, matching `expo-image-manipulator`'s `rotate`), or 0 when
+ * detection is unavailable / there isn't enough signal to straighten safely.
+ *
+ * This is the achievable on-device de-skew: a genuine arbitrary-angle correction
+ * derived from text geometry. It complements (does not replace) the coarse
+ * 0/90/180/270 `detectUprightRotation`. A true perspective de-warp still needs a
+ * native vision module the app deliberately doesn't bundle.
+ */
+export async function detectSkewRotation(uri: string): Promise<number> {
+  const { frames } = await recognizeBlocks(uri);
+  if (frames.length === 0) return 0;
+  return deskewRotation(frames);
 }
 
 /** Rotations we consider when auto-straightening a receipt photo. */

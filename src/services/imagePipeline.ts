@@ -33,7 +33,11 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { regionToPixelRect } from '@/lib/regions';
 import type { DetectedRegion, ImageMeta } from '@/types';
-import { detectReceiptRegions, detectUprightRotation } from './receiptDetect';
+import {
+  detectReceiptRegions,
+  detectSkewRotation,
+  detectUprightRotation,
+} from './receiptDetect';
 
 /**
  * Directory under the app's sandboxed document storage where finalized receipt
@@ -237,6 +241,40 @@ export async function enhanceImage(uri: string): Promise<string> {
 }
 
 /**
+ * Fine de-skew / straighten a receipt by an arbitrary small angle, on-device.
+ *
+ * Estimates the tilt from the receipt's OCR text-block geometry (see
+ * `detectSkewRotation`) and applies the corrective rotation with
+ * `expo-image-manipulator`'s arbitrary-angle `rotate`. This is a GENUINE
+ * sub-degree-to-~15° correction — not the coarse 0/90/180/270 step — so slightly
+ * crooked photos come out straight before OCR/extraction.
+ *
+ * Honest limitation: this corrects in-plane ROTATION only. A full perspective
+ * de-warp (correcting a receipt photographed at an angle so it looks scanned
+ * flat) needs a native quadrilateral/vision module the app deliberately doesn't
+ * bundle, so it remains out of scope. When detection is unavailable or the tilt
+ * is below threshold, the image is returned unchanged.
+ *
+ * @param uri  Local image uri.
+ * @returns    The straightened image uri, or the original on no-op/failure.
+ */
+export async function deskewImage(uri: string): Promise<string> {
+  if (!uri) return uri;
+  try {
+    const deg = await detectSkewRotation(uri);
+    if (!deg) return uri; // nothing worth correcting (or detection unavailable)
+    const out = await ImageManipulator.manipulateAsync(uri, [{ rotate: deg }], {
+      compress: ENHANCE_QUALITY,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    return out.uri;
+  } catch {
+    // Manipulator unavailable (web/test) or rotate failure — keep the source.
+    return uri;
+  }
+}
+
+/**
  * Crop a single normalized region out of an image (and optionally rotate it).
  *
  * The region's `x/y/width/height` are 0..1 fractions of the source image, so we
@@ -321,35 +359,52 @@ export async function splitImageIntoReceipts(
 }
 
 /**
- * Auto-crop a SINGLE receipt out of its background, on-device.
+ * Auto-crop + straighten a SINGLE receipt out of its background, on-device.
  *
- * Real document edge-detection (perspective-correcting the receipt's
- * quadrilateral) needs a native vision library we deliberately don't bundle.
- * Instead we use the free ML Kit text-block geometry: detect receipt regions and,
- * when EXACTLY ONE is found, tighten the image to that region before enhancing —
- * a genuine crop, not a no-op. When detection finds nothing we enhance the whole
- * image; when it finds MORE than one receipt we also enhance the whole image and
- * leave splitting to the dedicated multi-receipt flow (so we never silently keep
- * just one of several receipts).
+ * Pipeline (all on-device, all free — reuses the ML Kit OCR we already run):
+ *   1. De-skew: estimate the small tilt from text-block geometry and rotate the
+ *      photo straight (`deskewImage`) BEFORE detecting regions, so the crop is
+ *      tight to an upright receipt.
+ *   2. Auto-crop: detect receipt regions and, when EXACTLY ONE is found, tighten
+ *      to that region (a genuine crop). When detection finds nothing we keep the
+ *      whole image; when it finds MORE than one receipt we keep the whole image
+ *      and leave splitting to the dedicated multi-receipt flow (so we never
+ *      silently drop one of several receipts).
+ *   3. Enhance: downscale + high-quality re-encode for OCR/extraction.
  *
- * Honest limitation: this is an axis-aligned crop to the text bounds, not a true
- * perspective de-warp — that remains out of scope without a native cropper.
+ * Honest limitations:
+ *   - De-skew corrects in-plane ROTATION only; a true perspective de-warp needs a
+ *     native vision module the app deliberately doesn't bundle.
+ *   - The crop is axis-aligned to the text bounds, not a quadrilateral de-warp.
+ *   - Pixel-level contrast / brightness / denoise / grayscale-threshold passes
+ *     (which would help faded thermal receipts most) are NOT applied:
+ *     `expo-image-manipulator` exposes only geometric ops (resize/rotate/flip/
+ *     crop/extent), no per-pixel filters, so those remain out of scope without a
+ *     native image-processing module. The high-quality re-encode is the only
+ *     "contrast" we can honestly claim.
  *
- * @param uri  Local image uri.
- * @returns    The cropped-and-enhanced uri (single receipt) or the enhanced
- *             whole image otherwise. Never rejects.
+ * @param uri   Local image uri.
+ * @param opts  `deskew` (default true) toggles the fine straighten step so the
+ *              user can disable it independently of crop/enhance in Settings.
+ * @returns     The straightened-cropped-and-enhanced uri. Never rejects.
  */
-export async function autoCropHint(uri: string): Promise<string> {
+export async function autoCropHint(
+  uri: string,
+  opts: { deskew?: boolean } = {},
+): Promise<string> {
+  let working = uri;
   try {
-    const regions = await detectReceiptRegions(uri);
+    // Straighten first so the subsequent region crop is tight to the upright text.
+    if (opts.deskew !== false) working = await deskewImage(uri);
+    const regions = await detectReceiptRegions(working);
     if (regions.length === 1) {
-      const cropped = await cropNormalizedRegion(uri, regions[0], { padding: 0.02 });
+      const cropped = await cropNormalizedRegion(working, regions[0], { padding: 0.02 });
       return enhanceImage(cropped);
     }
   } catch {
-    // Detection unavailable/failed — fall through to a plain enhance.
+    // Detection/deskew unavailable or failed — fall through to a plain enhance.
   }
-  return enhanceImage(uri);
+  return enhanceImage(working);
 }
 
 /**

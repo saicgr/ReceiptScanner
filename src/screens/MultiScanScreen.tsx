@@ -30,6 +30,8 @@ import { useDraft } from '@/store/draft';
 import { pickReceiptsWithMeta, parseAssetMeta } from '@/services/imagePipeline';
 import { runBatch, processStitchedPages, MAX_BATCH } from '@/services/batchService';
 import { persistDraft } from '@/services/receiptService';
+import { listPaymentMethods } from '@/db/paymentMethods';
+import { detectPayment } from '@/lib/paymentDetect';
 import type { ImageMeta } from '@/types';
 
 interface Shot {
@@ -97,7 +99,7 @@ export default function MultiScanScreen() {
         setBusy('Reading all pages…');
         const { extraction } = await processStitchedPages(
           shots.map((s) => s.uri),
-          { autoCrop: settings.auto_crop },
+          { autoCrop: settings.auto_crop, deskew: settings.enhance_deskew },
         );
         useDraft.getState().startFromExtraction(extraction, {
           imageUris: shots.map((s) => s.uri), // keep every page image
@@ -134,9 +136,19 @@ export default function MultiScanScreen() {
         {
           concurrency: 3,
           autoCrop: settings.auto_crop,
+          deskew: settings.enhance_deskew,
           onProgress: (d, total) => setBusy(`Processing ${d}/${total}…`),
         },
       );
+
+      // Load the user's payment methods ONCE for on-device payment auto-detection
+      // across the whole batch (TASK 41). Best-effort — empty on failure.
+      let paymentMethods: { id: string; name: string }[] = [];
+      try {
+        paymentMethods = await listPaymentMethods();
+      } catch {
+        paymentMethods = [];
+      }
 
       let done = 0;
       let limitHit = false;
@@ -157,6 +169,12 @@ export default function MultiScanScreen() {
         });
         const cat = categoryIdFor(r.extraction.category);
         if (cat) draft.setField('category_id', cat);
+        // Auto-detect the payment method/card from this receipt's OCR text and
+        // pre-fill it (TASK 41). Non-destructive — only fills an unset method.
+        if (r.ocrText) {
+          const detection = detectPayment(r.ocrText, paymentMethods);
+          if (detection.brand) draft.applyPaymentDetection(detection);
+        }
         // Carry EXIF capture metadata; use capture date if the model found none.
         if (r.meta) {
           const cur = useDraft.getState();

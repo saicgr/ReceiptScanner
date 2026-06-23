@@ -10,7 +10,7 @@
  * the image with whatever text we have.
  */
 import type { ExtractionResult, ImageMeta } from '@/types';
-import { autoCropHint, enhanceImage, toBase64 } from './imagePipeline';
+import { autoCropHint, deskewImage, enhanceImage, toBase64 } from './imagePipeline';
 import { runOcr } from './ocr';
 import { extractReceipt } from './extractClient';
 import { listCategories } from '@/db/categories';
@@ -34,6 +34,8 @@ export interface BatchResult {
   originalUri: string;
   meta: ImageMeta | null;
   extraction: ExtractionResult | null;
+  /** Raw OCR text, for on-device payment-method auto-detection (TASK 41). */
+  ocrText: string;
   error?: string;
 }
 
@@ -51,15 +53,19 @@ async function ocrWithTimeout(uri: string): Promise<string> {
 
 /**
  * Run the full pipeline for ONE image: enhance (optional), OCR + base64 in
- * parallel, then extract. Returns the enhanced uri + extraction.
+ * parallel, then extract. Returns the enhanced uri, the extraction AND the raw
+ * OCR text (the caller uses it for on-device payment-method auto-detection —
+ * TASK 41 — without re-running OCR).
  */
 export async function processImage(
   uri: string,
-  opts: { autoCrop?: boolean; categoryHints?: string[] } = {},
-): Promise<{ uri: string; extraction: ExtractionResult }> {
-  // auto_crop ON  → detect + tighten to the single receipt, then enhance.
+  opts: { autoCrop?: boolean; deskew?: boolean; categoryHints?: string[] } = {},
+): Promise<{ uri: string; extraction: ExtractionResult; ocrText: string }> {
+  // auto_crop ON  → straighten + detect + tighten to the single receipt, then
+  //                 enhance (the `deskew` sub-toggle controls the straighten).
   // auto_crop OFF → keep the original untouched (per the Settings description).
-  const enhanced = opts.autoCrop === false ? uri : await autoCropHint(uri);
+  const enhanced =
+    opts.autoCrop === false ? uri : await autoCropHint(uri, { deskew: opts.deskew });
   // OCR and base64 both consume the enhanced image — run them concurrently so
   // the critical path is max(OCR, encode) instead of OCR + encode.
   const [ocrText, imageBase64] = await Promise.all([
@@ -72,7 +78,7 @@ export async function processImage(
     imageMimeType: 'image/jpeg',
     categoryHints: opts.categoryHints,
   });
-  return { uri: enhanced, extraction };
+  return { uri: enhanced, extraction, ocrText };
 }
 
 /**
@@ -95,7 +101,7 @@ export async function processImage(
  */
 export async function processStitchedPages(
   pageUris: string[],
-  opts: { autoCrop?: boolean; categoryHints?: string[] } = {},
+  opts: { autoCrop?: boolean; deskew?: boolean; categoryHints?: string[] } = {},
 ): Promise<{ uri: string; extraction: ExtractionResult }> {
   const pages = pageUris.filter((u): u is string => !!u);
   if (pages.length === 0) {
@@ -104,7 +110,15 @@ export async function processStitchedPages(
   }
 
   // Representative image = first page, enhanced (never auto-cropped — see note).
-  const firstEnhanced = opts.autoCrop === false ? pages[0] : await enhanceImage(pages[0]);
+  // Fine de-skew is still applied (when enabled) since straightening a long
+  // receipt only helps OCR; it's the axis-aligned crop we must avoid here.
+  let firstEnhanced: string;
+  if (opts.autoCrop === false) {
+    firstEnhanced = pages[0];
+  } else {
+    const straightened = opts.deskew === false ? pages[0] : await deskewImage(pages[0]);
+    firstEnhanced = await enhanceImage(straightened);
+  }
 
   // OCR every page on-device (free) and stitch the text in order.
   const texts = await Promise.all(pages.map((u) => ocrWithTimeout(u)));
@@ -130,6 +144,7 @@ export async function runBatch(
   opts: {
     concurrency?: number;
     autoCrop?: boolean;
+    deskew?: boolean;
     onProgress?: (done: number, total: number) => void;
   } = {},
 ): Promise<BatchResult[]> {
@@ -152,17 +167,25 @@ export async function runBatch(
       const i = cursor++;
       const item = capped[i];
       try {
-        const { uri, extraction } = await processImage(item.uri, {
+        const { uri, extraction, ocrText } = await processImage(item.uri, {
           autoCrop: opts.autoCrop,
+          deskew: opts.deskew,
           categoryHints,
         });
-        results[i] = { uri, originalUri: item.uri, meta: item.meta ?? null, extraction };
+        results[i] = {
+          uri,
+          originalUri: item.uri,
+          meta: item.meta ?? null,
+          extraction,
+          ocrText,
+        };
       } catch (e: any) {
         results[i] = {
           uri: item.uri,
           originalUri: item.uri,
           meta: item.meta ?? null,
           extraction: null,
+          ocrText: '',
           error: String(e?.message ?? e),
         };
       }

@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { newId } from '../lib/id';
 import { sumIncluded, round2 } from '../lib/money';
 import { deadlineFrom } from '../lib/dates';
+import type { PaymentDetection } from '../lib/paymentDetect';
 import type {
   Confidence,
   ExtractionResult,
@@ -66,6 +67,13 @@ export interface DraftState {
   // suggestions carried from extractor for the user to confirm
   suggested_tax_category: string | null;
   suggested_category: string | null;
+  /**
+   * Non-binding payment-method suggestion auto-detected from OCR text (TASK 41),
+   * e.g. "Visa" or "Cash". Shown on the review screen when we couldn't map it to
+   * one of the user's existing methods so the user can confirm/add it. Cleared
+   * once a payment method is chosen.
+   */
+  suggested_payment: string | null;
   // V3: condition attributes + capture (EXIF) metadata
   condition_tags: ReceiptCondition[];
   captured_at: string | null;
@@ -100,6 +108,14 @@ export interface DraftState {
 
   chooseDate: (iso: string) => void;
   setDuplicate: (id: string | null, score: number) => void;
+  /**
+   * Apply an on-device payment-method detection (TASK 41). Pre-fills
+   * `payment_method_id` from the matched user method, but ONLY when the user
+   * hasn't already chosen one — auto-detection is never destructive. When the
+   * detection didn't map to a user method, records the brand label as a
+   * non-binding `suggested_payment` for the review screen to surface.
+   */
+  applyPaymentDetection: (detection: PaymentDetection) => void;
 }
 
 const BLANK_FC: FieldConfidence = { vendor: 'low', date: 'low', total: 'low', tax: 'low' };
@@ -107,7 +123,7 @@ const BLANK_FC: FieldConfidence = { vendor: 'low', date: 'low', total: 'low', ta
 const initial = (): Omit<DraftState,
   | 'subtotal' | 'total' | 'startFromExtraction' | 'startFromReceipt' | 'reset'
   | 'setField' | 'patch' | 'addLineItem' | 'updateLineItem' | 'deleteLineItem'
-  | 'toggleIncluded' | 'chooseDate' | 'setDuplicate'> => ({
+  | 'toggleIncluded' | 'chooseDate' | 'setDuplicate' | 'applyPaymentDetection'> => ({
   active: false,
   id: '',
   vendor: '',
@@ -133,6 +149,7 @@ const initial = (): Omit<DraftState,
   deductible_percent: 100,
   suggested_tax_category: null,
   suggested_category: null,
+  suggested_payment: null,
   condition_tags: [],
   captured_at: null,
   captured_lat: null,
@@ -302,6 +319,19 @@ export const useDraft = create<DraftState>((set, get) => ({
     set({ date: iso, date_ambiguous: false, date_confidence: 'high' }),
 
   setDuplicate: (id, score) => set({ duplicateOfId: id, duplicateScore: score }),
+
+  applyPaymentDetection: (detection) => {
+    const s = get();
+    // Never override a payment method the user already set.
+    if (s.payment_method_id) return;
+    if (detection.matchedId) {
+      // Detected AND mapped to one of the user's methods — pre-fill it.
+      set({ payment_method_id: detection.matchedId, suggested_payment: null });
+    } else if (detection.label) {
+      // Detected a brand but no matching user method — surface a suggestion only.
+      set({ suggested_payment: detection.label });
+    }
+  },
 }));
 
 /** Compute receipt-level protection deadlines from the current draft. */
