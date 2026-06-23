@@ -39,7 +39,9 @@ import { decodeSnapshot } from '@/db/revisions';
 import { deleteReceiptCascade, revertToSnapshot } from '@/services/receiptService';
 import { shareWarrantyClaim } from '@/services/warrantyClaimService';
 import { findMatchesForReceipt, dismissMatch } from '@/services/recallService';
+import { summarizeReceipt } from '@/services/aiSummaryService';
 import { cardBenefitHints } from '@/lib/cardBenefits';
+import { t as tr } from '@/lib/i18n';
 import { formatMoney } from '@/lib/money';
 import { formatDate, relativeDays } from '@/lib/dates';
 import { hasValidCoords, formatCoords, mapsUrl } from '@/lib/maps';
@@ -93,6 +95,9 @@ export default function ReceiptDetailScreen() {
   const [protectionSheet, setProtectionSheet] = useState<ProtectionKind | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  // TASK 19 — AI receipt summary (opt-in, gated, degrades offline).
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) {
@@ -238,6 +243,33 @@ export default function ReceiptDetailScreen() {
     }
   };
 
+  // TASK 19 — generate the one-line AI summary. Gated like other cloud features
+  // (requires unlock); the service itself degrades to an on-device summary when
+  // the AI summary is disabled or the network is unavailable.
+  const onGenerateSummary = async () => {
+    if (summarizing) return;
+    if (!settings.is_unlocked) {
+      Alert.alert(
+        'Unlock required',
+        'The AI summary is part of the one-time ReceiptSnap unlock — no subscriptions, no ads.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Unlock', onPress: () => router.push('/paywall') },
+        ],
+      );
+      return;
+    }
+    setSummarizing(true);
+    try {
+      const res = await summarizeReceipt(r, { enabled: settings.ai_summary_enabled });
+      setSummary(res.summary);
+    } catch {
+      setSummary(null);
+    } finally {
+      setSummarizing(false);
+    }
+  };
+
   // TASK 47 — open the capture location in the device's native maps app.
   const hasLocation = hasValidCoords(r.captured_lat, r.captured_lng);
   const onOpenInMaps = async () => {
@@ -306,6 +338,12 @@ export default function ReceiptDetailScreen() {
           <Row gap={t.spacing.md} align="stretch">
             <FieldCard label="Payment" style={{ flex: 1 }}>
               <RNText style={{ color: t.colors.text, fontFamily: fonts.sansBold, fontSize: 15.5 }}>{payment?.name ?? 'Not set'}</RNText>
+              {/* TASK 62 — named account / specific card under the payment type. */}
+              {(r.account_label || r.account_last4) ? (
+                <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 12.5, marginTop: 2 }} numberOfLines={1}>
+                  {r.account_label ?? 'Account'}{r.account_last4 ? ` ····${r.account_last4}` : ''}
+                </RNText>
+              ) : null}
             </FieldCard>
             <FieldCard label="Tax" style={{ flex: 1 }}>
               <RNText style={{ color: t.colors.text, fontFamily: fonts.sansBold, fontSize: 15.5 }}>
@@ -313,6 +351,18 @@ export default function ReceiptDetailScreen() {
               </RNText>
             </FieldCard>
           </Row>
+
+          {/* TASK 66 — source badge for email-forwarded receipts. */}
+          {r.source === 'email' ? (
+            <Row style={{ marginTop: t.spacing.xs, marginBottom: t.spacing.sm }}>
+              <Badge
+                label={tr('receipt.receivedViaEmail')}
+                icon="mail-outline"
+                color={t.colors.brand}
+                background={t.colors.brandTint}
+              />
+            </Row>
+          ) : null}
 
           {/* Extra classification chips (currency / tax cat / deductible / tags). */}
           {(taxCategory || r.is_deductible || r.tags.length > 0) ? (
@@ -375,6 +425,31 @@ export default function ReceiptDetailScreen() {
               <RNText style={{ color: t.colors.text, fontFamily: fonts.sansMedium, fontSize: 14.5, lineHeight: 20 }}>{r.memo}</RNText>
             </FieldCard>
           ) : null}
+
+          {/* TASK 19 — AI one-line summary (opt-in, gated, offline-graceful). */}
+          <SectionLabel text={tr('receipt.summary')} />
+          <FieldCard>
+            {summary ? (
+              <RNText style={{ color: t.colors.text, fontFamily: fonts.sansMedium, fontSize: 14.5, lineHeight: 20 }}>
+                {summary}
+              </RNText>
+            ) : (
+              <RNText style={{ color: t.colors.textMuted, fontFamily: fonts.sansMedium, fontSize: 13.5, lineHeight: 19 }}>
+                {settings.ai_summary_enabled
+                  ? 'Generate a one-line summary of this receipt.'
+                  : 'Generate a one-line summary. Turn on AI summary in Settings for a smarter result; otherwise a local summary is used.'}
+              </RNText>
+            )}
+            <Button
+              title={summary ? 'Regenerate summary' : tr('receipt.summary.generate')}
+              icon="sparkles-outline"
+              variant="secondary"
+              size="sm"
+              loading={summarizing}
+              style={{ marginTop: t.spacing.md, alignSelf: 'flex-start' }}
+              onPress={onGenerateSummary}
+            />
+          </FieldCard>
 
           {/* Line items + emerald summary. */}
           <SectionLabel text={`Line items · ${r.line_items.length}`} />

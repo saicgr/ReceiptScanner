@@ -80,6 +80,15 @@ export interface LineItem {
 export interface Receipt {
   id: string;
   vendor: string;
+  // ---- V7: named accounts / specific card tracking (TASK 62) ----
+  /**
+   * Optional account label distinct from the payment-method *type*. The type
+   * (payment_method_id) says "Credit Card"; this names the SPECIFIC instrument,
+   * e.g. "Amex Gold". Editable on review/detail and shown next to payment.
+   */
+  account_label: string | null;
+  /** Last 4 digits of the specific card/account, when known (e.g. "0694"). */
+  account_last4: string | null;
   /** Canonical ISO date (YYYY-MM-DD) once disambiguated. */
   date: string | null;
   date_confidence: Confidence;
@@ -388,6 +397,71 @@ export interface CashExpense {
 }
 
 // ---------------------------------------------------------------------------
+// Localization (V7 — TASK 59 scaffolding)
+// ---------------------------------------------------------------------------
+
+/** Supported UI language codes. English is the only shipped catalog so far. */
+export type LanguageCode = 'en' | 'es' | 'fr' | 'de';
+
+// ---------------------------------------------------------------------------
+// Report column picker (V7 — TASK 16)
+//
+// The user can choose WHICH columns appear in CSV/Excel exports, REORDER them,
+// switch between a per-line-item ("single") report and a per-receipt ("group")
+// report, and set a free-text report header. Persisted in settings.report_config
+// and honored by src/services/exporters.ts. The set of selectable columns is a
+// fixed vocabulary (ReportColumnId); pure (de)serialization lives in
+// src/lib/reportConfig.ts.
+// ---------------------------------------------------------------------------
+
+/** Every column the itemized export can emit, in canonical default order. */
+export type ReportColumnId =
+  | 'type'
+  | 'date'
+  | 'vendor'
+  | 'item'
+  | 'qty'
+  | 'unit_price'
+  | 'line_total'
+  | 'category'
+  | 'payment_method'
+  | 'account'
+  | 'currency'
+  | 'receipt_total'
+  | 'tax'
+  | 'memo'
+  | 'tags'
+  | 'tax_category'
+  | 'deductible'
+  | 'deductible_percent'
+  | 'deductible_amount'
+  | 'status'
+  | 'receipt_id';
+
+/** Whether a report row is one-per-line-item or one-per-receipt. */
+export type ReportMode = 'single' | 'group';
+
+export interface ReportConfig {
+  /** Ordered, visible column ids. Empty falls back to the canonical default. */
+  columns: ReportColumnId[];
+  /** 'single' = one row per line item; 'group' = one row per receipt. */
+  mode: ReportMode;
+  /** Optional free-text header included at the top of CSV/Excel exports. */
+  header: string;
+}
+
+export const DEFAULT_REPORT_CONFIG: ReportConfig = {
+  columns: [
+    'type', 'date', 'vendor', 'item', 'qty', 'unit_price', 'line_total',
+    'category', 'payment_method', 'account', 'currency', 'receipt_total', 'tax',
+    'memo', 'tags', 'tax_category', 'deductible', 'deductible_percent',
+    'deductible_amount', 'status', 'receipt_id',
+  ],
+  mode: 'single',
+  header: '',
+};
+
+// ---------------------------------------------------------------------------
 // Settings (key/value, typed accessor in db/settings.ts)
 // ---------------------------------------------------------------------------
 
@@ -433,6 +507,18 @@ export interface AppSettings {
    * foreground-location grant). OFF by default for privacy — the user opts in.
    */
   geotag_receipts: boolean;
+  // ---- V7: localization (TASK 59) ----
+  /** UI language code (BCP-47-ish, e.g. 'en'). English-only catalog for now. */
+  language: LanguageCode;
+  // ---- V7: voice interaction (TASK 52) ----
+  /** Speak prompts aloud during hands-free field entry (expo-speech TTS). */
+  voice_enabled: boolean;
+  // ---- V7: report column picker (TASK 16) ----
+  /** User-customized export column selection / order / report layout. */
+  report_config: ReportConfig;
+  // ---- V7: AI receipt summary (TASK 19) ----
+  /** Opt-in one-line AI summary via the existing Gemini proxy (cloud, gated). */
+  ai_summary_enabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -457,6 +543,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enhance_deskew: true,
   app_lock: false,
   geotag_receipts: false, // privacy-first: location tagging is opt-in
+  language: 'en',
+  voice_enabled: false,
+  report_config: DEFAULT_REPORT_CONFIG,
+  ai_summary_enabled: false,
 };
 
 // ---------------------------------------------------------------------------

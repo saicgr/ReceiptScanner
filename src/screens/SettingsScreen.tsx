@@ -34,6 +34,9 @@ import {
 import { useSettings } from '@/store/settings';
 import { useLookups } from '@/store/lookups';
 import { parseMoney } from '@/lib/money';
+import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES } from '@/lib/i18n';
+import { isSpeechAvailable } from '@/services/voiceService';
+import type { LanguageCode } from '@/types';
 import * as DB from '@/db';
 import { authenticate } from '@/services/appLock';
 import { exportReceiptsHtml, shareFile } from '@/services/exporters';
@@ -67,13 +70,21 @@ const DATE_FORMAT_OPTIONS: SelectOption[] = [
   { label: 'MMM D YYYY', value: 'MMM D YYYY', subtitle: 'Jun 4 2026' },
 ];
 
+// Language options (TASK 59). English ships a full catalog; the others are
+// scaffolding (they fall back to English until translated).
+const LANGUAGE_OPTIONS: SelectOption[] = SUPPORTED_LANGUAGES.map((code) => ({
+  label: LANGUAGE_NAMES[code],
+  value: code,
+  subtitle: code === 'en' ? undefined : 'Falls back to English',
+}));
+
 export default function SettingsScreen() {
   const t = useTheme();
   const { settings, update } = useSettings();
   const lookups = useLookups();
 
   // Which inline picker sheet (if any) is open.
-  const [sheet, setSheet] = useState<'currency' | 'date_format' | null>(null);
+  const [sheet, setSheet] = useState<'currency' | 'date_format' | 'language' | null>(null);
 
   // Guards the one-shot HTML export and the destructive clear-all so we don't
   // fire either twice while it's in flight.
@@ -556,6 +567,51 @@ export default function SettingsScreen() {
         )}
       </Card>
 
+      {/* Language & input — localization (TASK 59), voice (TASK 52), AI (TASK 19) */}
+      <SectionHeader title="Language & input" />
+      <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
+        <ListRow
+          icon="language-outline"
+          title="Language"
+          subtitle="English fully translated; others fall back to English"
+          rightText={LANGUAGE_NAMES[settings.language]}
+          onPress={() => setSheet('language')}
+        />
+        <Divider spacing={0} />
+        <ListRow
+          icon="mic-outline"
+          title="Voice prompts"
+          subtitle={
+            isSpeechAvailable()
+              ? 'Speak field prompts aloud for hands-free entry'
+              : 'Spoken prompts (text-to-speech unavailable on this device)'
+          }
+          right={
+            <Switch
+              value={settings.voice_enabled}
+              onValueChange={(v) => update({ voice_enabled: v })}
+              trackColor={{ true: t.colors.brand }}
+            />
+          }
+        />
+        <Divider spacing={0} />
+        <ListRow
+          icon="sparkles-outline"
+          title="AI receipt summary"
+          subtitle="Opt-in: a smarter one-line summary via the cloud (gated by unlock)"
+          right={
+            <Switch
+              value={settings.ai_summary_enabled}
+              onValueChange={(v) => update({ ai_summary_enabled: v })}
+              trackColor={{ true: t.colors.brand }}
+            />
+          }
+        />
+      </Card>
+      <Text variant="caption" color={t.colors.textMuted} style={{ marginTop: 6 }}>
+        Voice dictation (speech-to-text) is not yet available; prompts are read aloud only.
+      </Text>
+
       {/* Backup & reports */}
       <SectionHeader title="Backup & reports" />
       <Card padded={false} style={{ paddingHorizontal: t.spacing.lg }}>
@@ -564,6 +620,13 @@ export default function SettingsScreen() {
           title="Backup & Restore"
           subtitle="Your own Google Drive or OneDrive"
           onPress={() => router.push('/settings/backup')}
+        />
+        <Divider spacing={0} />
+        <ListRow
+          icon="grid-outline"
+          title="Export columns"
+          subtitle="Pick, reorder and lay out CSV/Excel report columns"
+          onPress={() => router.push('/settings/report-columns')}
         />
         <Divider spacing={0} />
         <ListRow
@@ -615,6 +678,16 @@ export default function SettingsScreen() {
         onClose={() => setSheet(null)}
         onSelect={(v) => {
           if (v[0]) update({ date_format: v[0] });
+        }}
+      />
+      <SelectSheet
+        visible={sheet === 'language'}
+        title="Language"
+        options={LANGUAGE_OPTIONS}
+        selected={[settings.language]}
+        onClose={() => setSheet(null)}
+        onSelect={(v) => {
+          if (v[0]) update({ language: v[0] as LanguageCode });
         }}
       />
     </Screen>

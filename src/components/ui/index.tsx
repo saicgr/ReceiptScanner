@@ -737,6 +737,91 @@ export function MoneyInput({
 }
 
 // ---------------------------------------------------------------------------
+// AutocompleteField — a TextField that suggests from existing values as the
+// user types (TASK 57). Pure presentation: the caller passes the already-ranked
+// `suggestions` (see src/lib/autocomplete.ts) and we render a tap-to-fill list
+// beneath the field while it's focused. Picking a suggestion fills the field.
+// ---------------------------------------------------------------------------
+export function AutocompleteField({
+  label,
+  value,
+  onChangeText,
+  suggestions,
+  onPick,
+  placeholder,
+  confidence,
+  right,
+  style,
+}: {
+  label?: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  /** Ranked suggestion strings (already filtered against `value`). */
+  suggestions: string[];
+  /** Called when a suggestion is tapped; defaults to onChangeText. */
+  onPick?: (v: string) => void;
+  placeholder?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  right?: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const t = useTheme();
+  const [focused, setFocused] = useState(false);
+  const pick = onPick ?? onChangeText;
+  const show = focused && suggestions.length > 0;
+  return (
+    <View style={style}>
+      <TextField
+        label={label}
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        // Delay blur so a tap on a suggestion registers before the list unmounts.
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        placeholder={placeholder}
+        confidence={confidence}
+        right={right}
+        style={show ? { marginBottom: 4 } : undefined}
+      />
+      {show ? (
+        <View
+          style={{
+            backgroundColor: t.colors.surface,
+            borderRadius: t.radius.md,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            marginBottom: t.spacing.md,
+            overflow: 'hidden',
+          }}
+        >
+          {suggestions.map((s, i) => (
+            <Pressable
+              key={s}
+              onPress={() => pick(s)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                paddingVertical: t.spacing.sm,
+                paddingHorizontal: t.spacing.md,
+                borderTopWidth: i === 0 ? 0 : 1,
+                borderTopColor: t.colors.border,
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <Ionicons name="return-down-forward-outline" size={14} color={t.colors.textMuted} />
+              <RNText style={{ color: t.colors.text, fontSize: t.fontSize.sm, flex: 1 }} numberOfLines={1}>
+                {s}
+              </RNText>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Stepper (qty control)
 // ---------------------------------------------------------------------------
 export function Stepper({

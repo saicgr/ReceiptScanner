@@ -47,7 +47,8 @@ export async function createReceipt(
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `INSERT INTO receipts (
-        id, vendor, date, date_confidence, date_ambiguous, date_options,
+        id, vendor, account_label, account_last4,
+        date, date_confidence, date_ambiguous, date_options,
         total, tax, subtotal, currency, category_id, payment_method_id, memo,
         original_image_uri, saved_filename, image_format, source, status,
         content_hash, duplicate_of, field_confidence,
@@ -55,10 +56,12 @@ export async function createReceipt(
         protection_status, tax_category_id, is_deductible, deductible_percent,
         condition_tags, captured_at, captured_lat, captured_lng,
         created_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         input.vendor ?? '',
+        input.account_label ?? null,
+        input.account_last4 ?? null,
         input.date ?? null,
         input.date_confidence ?? 'low',
         toInt(input.date_ambiguous ?? false),
@@ -279,6 +282,8 @@ export async function listReceiptsWithRelations(
 
 const RECEIPT_COLUMNS = new Set([
   'vendor',
+  'account_label',
+  'account_last4',
   'date',
   'date_confidence',
   'date_ambiguous',
@@ -750,6 +755,25 @@ export async function quickStats(
     });
   }
   return out;
+}
+
+/**
+ * Distinct non-empty vendor names, most-recent first — the candidate pool for
+ * vendor autocomplete on the review screen (TASK 57). Capped so the suggestion
+ * source stays small and cheap.
+ */
+export async function listVendors(limit = 200): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ vendor: string }>(
+    `SELECT vendor, MAX(created_at) as latest
+     FROM receipts
+     WHERE vendor IS NOT NULL AND vendor != ''
+     GROUP BY vendor
+     ORDER BY latest DESC
+     LIMIT ?`,
+    [limit],
+  );
+  return rows.map((r) => r.vendor);
 }
 
 export async function countReceipts(): Promise<number> {

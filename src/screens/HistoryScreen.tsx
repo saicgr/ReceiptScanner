@@ -777,9 +777,18 @@ function ReceiptRow({
             {receipt.vendor || 'Untitled receipt'}
           </Text>
         </Row>
-        <Text variant="caption" color={t.colors.textMuted}>
-          {formatDate(receipt.date, dateFormat) || 'No date'}
-        </Text>
+        <Row gap={6} align="center">
+          <Text variant="caption" color={t.colors.textMuted}>
+            {formatDate(receipt.date, dateFormat) || 'No date'}
+          </Text>
+          {/* TASK 66 — flag email-forwarded receipts inline. */}
+          {receipt.source === 'email' ? (
+            <Row gap={3} align="center">
+              <Icon name="mail-outline" size={12} color={t.colors.brand} />
+              <Text variant="caption" color={t.colors.brand}>Email</Text>
+            </Row>
+          ) : null}
+        </Row>
       </View>
 
       <View style={{ alignItems: 'flex-end', gap: 4 }}>

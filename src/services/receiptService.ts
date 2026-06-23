@@ -327,6 +327,8 @@ export async function persistDraft(opts?: {
   // Assemble the persisted receipt fields shared by create + update.
   const baseFields: Partial<Receipt> = {
     vendor: state.vendor,
+    account_label: state.account_label,
+    account_last4: state.account_last4,
     date: state.date,
     date_confidence: state.date_confidence,
     date_ambiguous: state.date_ambiguous,

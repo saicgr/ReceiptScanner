@@ -63,6 +63,7 @@ export default function RootLayout() {
           <Stack.Screen name="settings/budgets" options={{ title: 'Budgets' }} />
           <Stack.Screen name="budget-report" options={{ title: 'Budget vs Actual' }} />
           <Stack.Screen name="settings/filename" options={{ title: 'Filename Template' }} />
+          <Stack.Screen name="settings/report-columns" options={{ title: 'Export Columns' }} />
           <Stack.Screen name="settings/backup" options={{ title: 'Backup & Restore' }} />
           <Stack.Screen name="settings/about" options={{ title: 'About' }} />
           <Stack.Screen name="settings/roadmap" options={{ title: 'Roadmap' }} />

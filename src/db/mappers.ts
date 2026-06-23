@@ -53,6 +53,8 @@ export function mapReceipt(r: any): Receipt {
   return {
     id: r.id,
     vendor: r.vendor ?? '',
+    account_label: r.account_label ?? null,
+    account_last4: r.account_last4 ?? null,
     date: r.date ?? null,
     date_confidence: (r.date_confidence ?? 'low') as Confidence,
     date_ambiguous: toBool(r.date_ambiguous),

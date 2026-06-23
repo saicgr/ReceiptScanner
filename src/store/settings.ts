@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { DEFAULT_SETTINGS, type AppSettings } from '../types';
 import { getAllSettings, updateSettings } from '../db/settings';
+import { setLanguage } from '../lib/i18n';
 
 interface SettingsState {
   settings: AppSettings;
@@ -23,11 +24,14 @@ export const useSettings = create<SettingsState>((set, get) => ({
 
   load: async () => {
     const settings = await getAllSettings();
+    setLanguage(settings.language);
     set({ settings, loaded: true });
   },
 
   update: async (patch) => {
     set({ settings: { ...get().settings, ...patch } });
+    // Keep the i18n active language in sync when it changes.
+    if (patch.language !== undefined) setLanguage(patch.language);
     await updateSettings(patch);
   },
 

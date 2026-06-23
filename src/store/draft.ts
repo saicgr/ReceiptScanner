@@ -42,6 +42,9 @@ export interface DraftState {
   id: string;
   // Core editable fields
   vendor: string;
+  /** Named account / specific card (TASK 62): label + last-4, both optional. */
+  account_label: string | null;
+  account_last4: string | null;
   date: string | null;
   date_confidence: Confidence;
   date_ambiguous: boolean;
@@ -127,6 +130,8 @@ const initial = (): Omit<DraftState,
   active: false,
   id: '',
   vendor: '',
+  account_label: null,
+  account_last4: null,
   date: null,
   date_confidence: 'low',
   date_ambiguous: false,
@@ -233,6 +238,8 @@ export const useDraft = create<DraftState>((set, get) => ({
       active: true,
       id: r.id,
       vendor: r.vendor,
+      account_label: r.account_label,
+      account_last4: r.account_last4,
       date: r.date,
       date_confidence: r.date_confidence,
       date_ambiguous: r.date_ambiguous,

@@ -206,6 +206,42 @@ async function extractReceiptNoSchema(parts) {
 }
 
 // ---------------------------------------------------------------------------
+// One-line receipt summary (TASK 19 — optional, opt-in, billed Gemini call)
+//
+// Text-only: the app sends a compact JSON of the already-extracted fields and
+// gets back a single natural-language sentence for an expense log. No image, no
+// response schema (we just take the model's text and keep the first line).
+// ---------------------------------------------------------------------------
+export async function summarizeReceipt(receipt) {
+  const prompt = `Write ONE short, natural-language sentence (max ~25 words) summarizing this purchase for an expense log. Plain text only — no preamble, no markdown, no quotes.
+
+Receipt JSON:
+${JSON.stringify(receipt).slice(0, 4000)}`;
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 80 },
+  };
+  const res = await fetchWithTimeout(
+    geminiUrl(),
+    { method: 'POST', headers: geminiHeaders(), body: JSON.stringify(body) },
+    20000,
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    const err = new Error(`Gemini ${res.status}: ${errText.slice(0, 300)}`);
+    err.status = res.status;
+    throw err;
+  }
+  const json = await res.json();
+  const text = (json?.candidates?.[0]?.content?.parts || [])
+    .map((p) => p.text || '')
+    .join('')
+    .trim();
+  // Keep the first non-empty line and strip any wrapping quotes the model added.
+  return text.split('\n').map((l) => l.trim()).find(Boolean)?.replace(/^["']|["']$/g, '') || '';
+}
+
+// ---------------------------------------------------------------------------
 // Multi-receipt detection (OPTIONAL "Refine with AI" path)
 //
 // The app detects multiple receipts in one photo ON-DEVICE for free; this Gemini

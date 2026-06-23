@@ -23,7 +23,7 @@ import express from 'express';
 import multer from 'multer';
 import { createHash } from 'node:crypto';
 import { config, assertConfigured } from './config.js';
-import { extractReceipt, detectReceipts } from './gemini.js';
+import { extractReceipt, detectReceipts, summarizeReceipt } from './gemini.js';
 import { deviceTokenFor, requireDeviceAuth } from './deviceAuth.js';
 import {
   checkAndConsume,
@@ -174,6 +174,40 @@ app.post('/extract', jsonImage, requireDeviceAuth, async (req, res) => {
     res
       .status(err.status && err.status < 500 ? err.status : 502)
       .json({ error: 'extraction_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /summarize
+// Accepts JSON: { receipt: {...compact fields...} }. Requires device auth.
+// Optional, opt-in one-line AI summary (TASK 19). It's a billed Gemini call but
+// NOT a "scan" — it does not consume the device scan counter; only the per-IP
+// and global daily caps apply (with a global refund on server-side failure).
+// ---------------------------------------------------------------------------
+app.post('/summarize', jsonSmall, requireDeviceAuth, async (req, res) => {
+  const { receipt } = req.body || {};
+  if (!receipt || typeof receipt !== 'object') {
+    return res.status(400).json({ error: 'bad_request', message: 'Provide receipt.' });
+  }
+
+  const ipLimit = ipCheckAndConsume(req.ip, 'summarize', config.rateLimit.extractPerDayPerIp);
+  if (!ipLimit.ok) {
+    return res.status(ipLimit.status).json({ error: ipLimit.reason, message: ipLimit.message });
+  }
+  const budget = globalCheckAndConsume();
+  if (!budget.ok) {
+    return res.status(budget.status).json({ error: budget.reason, message: budget.message });
+  }
+
+  try {
+    const summary = await summarizeReceipt(receipt);
+    res.json({ summary });
+  } catch (err) {
+    console.error('[summarize] error:', err.message);
+    if (!err.status || err.status >= 500) globalRefund();
+    res
+      .status(err.status && err.status < 500 ? err.status : 502)
+      .json({ error: 'summarize_failed', message: err.message });
   }
 });
 

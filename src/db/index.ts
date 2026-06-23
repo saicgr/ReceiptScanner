@@ -39,6 +39,7 @@ export {
   spendByDay,
   quickStats,
   countReceipts,
+  listVendors,
 } from './receipts';
 export {
   listCategories,

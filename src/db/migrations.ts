@@ -407,7 +407,21 @@ const m5_v6: Migration = async (db) => {
   `);
 };
 
+// ---------------------------------------------------------------------------
+// Migration 6 -> 7 : V7 named accounts / specific-card tracking (TASK 62)
+//
+// A receipt's payment_method_id captures the *type* (Credit Card, Cash, …).
+// These two optional columns name the SPECIFIC instrument behind that type —
+// e.g. account_label "Amex Gold" with account_last4 "0694" — so users who carry
+// several cards of the same type can tell their receipts apart. Purely
+// informational metadata; nothing else keys off it.
+// ---------------------------------------------------------------------------
+const m6_v7: Migration = async (db) => {
+  await addColumn(db, 'receipts', 'account_label', 'TEXT');
+  await addColumn(db, 'receipts', 'account_last4', 'TEXT');
+};
+
 /** Ordered list. Index i migrates the schema from version i to i+1. */
-export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3, m3_v4, m4_v5, m5_v6];
+export const MIGRATIONS: Migration[] = [m0_initial, m1_v2, m2_v3, m3_v4, m4_v5, m5_v6, m6_v7];
 
 export const LATEST_VERSION = MIGRATIONS.length;

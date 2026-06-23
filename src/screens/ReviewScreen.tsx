@@ -37,6 +37,7 @@ import {
   Divider,
   Spacer,
   LoadingOverlay,
+  AutocompleteField,
   useTheme,
   type IconName,
   type SelectOption,
@@ -47,6 +48,10 @@ import { useSettings } from '@/store/settings';
 import { useLookups } from '@/store/lookups';
 import { persistDraft } from '@/services/receiptService';
 import { pickFromGallery } from '@/services/imagePipeline';
+import { speak } from '@/services/voiceService';
+import * as DB from '@/db';
+import { suggest } from '@/lib/autocomplete';
+import { t as tr } from '@/lib/i18n';
 import { formatMoney, parseMoney, lineTotal } from '@/lib/money';
 import { formatDate, deadlineFrom } from '@/lib/dates';
 
@@ -85,12 +90,28 @@ export default function ReviewScreen() {
 
   const [sheet, setSheet] = useState<Sheet>({ kind: 'none' });
   const [saving, setSaving] = useState(false);
+  // Vendor history powering the vendor autocomplete (TASK 57).
+  const [vendorHistory, setVendorHistory] = useState<string[]>([]);
 
   // Ensure lookups are present (categories/tax cats/payment/tags) for the pickers.
   useFocusEffect(
     useCallback(() => {
       if (!lookups.loaded) lookups.refresh();
     }, [lookups.loaded]), // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // Load the distinct vendor list once for vendor autocomplete suggestions.
+  useFocusEffect(
+    useCallback(() => {
+      DB.listVendors().then(setVendorHistory).catch(() => setVendorHistory([]));
+    }, []),
+  );
+
+  // Voice prompt helper (TASK 52): speak a localized prompt when a field gains
+  // focus, but only when the user enabled hands-free voice in Settings.
+  const prompt = useCallback(
+    (key: string) => speak(tr(key), settings.voice_enabled),
+    [settings.voice_enabled],
   );
 
   // ---- Live-derived values ---------------------------------------------------
@@ -166,6 +187,12 @@ export default function ReviewScreen() {
   const category = lookups.categoryById(d.category_id);
   const payment = lookups.paymentById(d.payment_method_id);
   const taxCategory = lookups.taxCategoryById(d.tax_category_id);
+
+  // Vendor autocomplete suggestions, recomputed as the user types (TASK 57).
+  const vendorSuggestions = useMemo(
+    () => suggest(d.vendor, vendorHistory, { limit: 5 }),
+    [d.vendor, vendorHistory],
+  );
 
   // ---- Save ------------------------------------------------------------------
   const onSave = async () => {
@@ -312,13 +339,16 @@ export default function ReviewScreen() {
       {/* ------------------------------------------------------------------ */}
       <SectionHeader title="Details" />
       <Card>
-        <TextField
-          label="Vendor"
-          value={d.vendor}
-          onChangeText={(v) => setField('vendor', v)}
-          placeholder="Who did you pay?"
-          confidence={d.field_confidence.vendor}
-        />
+        <View onTouchStart={() => prompt('review.vendor')}>
+          <AutocompleteField
+            label={tr('review.vendor')}
+            value={d.vendor}
+            onChangeText={(v) => setField('vendor', v)}
+            suggestions={vendorSuggestions}
+            placeholder="Who did you pay?"
+            confidence={d.field_confidence.vendor}
+          />
+        </View>
 
         {/* DATE — ambiguous dates become chips the user must pick from. */}
         <DateField
@@ -459,6 +489,33 @@ export default function ReviewScreen() {
             </Row>
           </Pressable>
         ) : null}
+
+        {/* Named account / specific card (TASK 62): distinct from the payment
+            *type* above. Label + last-4 identify WHICH card (e.g. Amex Gold). */}
+        <Row gap={t.spacing.md} align="flex-start" style={{ marginTop: t.spacing.sm }}>
+          <View style={{ flex: 2 }}>
+            <TextField
+              label={tr('review.account')}
+              value={d.account_label ?? ''}
+              onChangeText={(v) => setField('account_label', v.trim() === '' ? null : v)}
+              placeholder={tr('review.account.placeholder')}
+              style={{ marginBottom: 0 }}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <TextField
+              label={tr('review.account.last4')}
+              value={d.account_last4 ?? ''}
+              onChangeText={(v) => {
+                const digits = v.replace(/\D/g, '').slice(0, 4);
+                setField('account_last4', digits === '' ? null : digits);
+              }}
+              keyboardType="number-pad"
+              placeholder="0694"
+              style={{ marginBottom: 0 }}
+            />
+          </View>
+        </Row>
         <Divider spacing={t.spacing.sm} />
 
         {/* Tags (trip / job grouping) — multi-select rendered as chips. */}
@@ -571,9 +628,9 @@ export default function ReviewScreen() {
 
       {/* Save — the only thing that finalizes the receipt. */}
       <Spacer size={t.spacing.xl} />
-      <Button title="Save receipt" icon="checkmark" size="lg" onPress={onSave} />
+      <Button title={tr('review.saveReceipt')} icon="checkmark" size="lg" onPress={onSave} />
       <Spacer size={t.spacing.md} />
-      <Button title="Discard" variant="ghost" onPress={onDiscard} />
+      <Button title={tr('review.discard')} variant="ghost" onPress={onDiscard} />
         </View>
       </ScrollView>
 

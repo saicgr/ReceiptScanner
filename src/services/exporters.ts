@@ -29,6 +29,11 @@ import { getAllSettings } from '@/db/settings';
 import { toCsv } from '@/lib/csv';
 import { csvMoney, formatMoney, lineTotal, round2 } from '@/lib/money';
 import { formatDate } from '@/lib/dates';
+import {
+  columnHeader,
+  effectiveColumns,
+  normalizeReportConfig,
+} from '@/lib/reportConfig';
 import type {
   AccountingFormat,
   Category,
@@ -36,6 +41,8 @@ import type {
   LineItem,
   PaymentMethod,
   ReceiptWithRelations,
+  ReportColumnId,
+  ReportConfig,
   TaxCategory,
   TaxReportRow,
 } from '@/types';
@@ -56,6 +63,8 @@ export interface ExportRow {
   vendor: string;
   category: string;
   paymentMethod: string;
+  /** Named account / specific card (TASK 62), e.g. "Amex Gold ****0694". */
+  account: string;
   taxCategory: string;
   currency: string;
 
@@ -135,7 +144,8 @@ export async function exportReceipts(
         settings.default_currency,
         lookups,
       );
-      contents = itemizedCsv([...rows, ...extras]);
+      // Honor the user's column picker / report mode / header (TASK 16).
+      contents = itemizedCsv([...rows, ...extras], settings.report_config);
       break;
     }
     case 'quickbooks_csv':
@@ -207,7 +217,7 @@ export async function exportReceiptList(
     case 'csv':
     case 'excel':
     default:
-      return writeTextFile(itemizedCsv(rows), stem, 'csv');
+      return writeTextFile(itemizedCsv(rows, settings.report_config), stem, 'csv');
   }
 }
 
@@ -315,6 +325,7 @@ function receiptToRows(
 ): ExportRow[] {
   const tags = receipt.tags.map((t) => t.name).join('; ');
   const payment = lookups.paymentById.get(receipt.payment_method_id ?? '')?.name ?? '';
+  const account = formatAccount(receipt.account_label, receipt.account_last4);
   const taxCategory =
     lookups.taxCategoryById.get(receipt.tax_category_id ?? '')?.name ?? '';
   const receiptCategory =
@@ -331,6 +342,7 @@ function receiptToRows(
     isoDate: receipt.date,
     vendor: receipt.vendor,
     paymentMethod: payment,
+    account,
     taxCategory,
     currency: receipt.currency,
     receiptTotal: round2(receipt.total),
@@ -432,6 +444,7 @@ async function extraExpenseRows(
         vendor: 'Mileage',
         category: catName(tr.category_id),
         paymentMethod: '',
+        account: '',
         taxCategory: taxName(tr.tax_category_id),
         currency: tripCurrency,
         // Qty = miles, unit price = the per-mile rate persisted on the trip.
@@ -466,6 +479,7 @@ async function extraExpenseRows(
       vendor: ce.vendor,
       category: catName(ce.category_id),
       paymentMethod: lookups.paymentById.get(ce.payment_method_id ?? '')?.name ?? '',
+      account: '',
       taxCategory: taxName(ce.tax_category_id),
       currency: ce.currency,
       itemName: '(cash expense)',
@@ -494,53 +508,95 @@ async function extraExpenseRows(
 // Generic itemized CSV / Excel
 // ---------------------------------------------------------------------------
 
-const ITEMIZED_HEADERS = [
-  'Type', // 'Receipt' | 'Mileage' | 'Cash Expense' — keeps the merged file parseable
-  'Date',
-  'Vendor',
-  'Item',
-  'Qty',
-  'Unit Price',
-  'Line Total',
-  'Category',
-  'Payment Method',
-  'Currency',
-  'Receipt Total',
-  'Tax',
-  'Memo', // ALWAYS present (competitor fix)
-  'Tags', // ALWAYS present (competitor fix)
-  'Tax Category',
-  'Deductible',
-  'Deductible %',
-  'Deductible Amount',
-  'Status',
-  'Receipt ID',
-];
+/** Format the named-account column (TASK 62): "Label ****1234" / either part. */
+function formatAccount(label: string | null, last4: string | null): string {
+  const l = (label ?? '').trim();
+  const four = (last4 ?? '').trim();
+  if (l && four) return `${l} ****${four}`;
+  if (l) return l;
+  if (four) return `****${four}`;
+  return '';
+}
 
-function itemizedCsv(rows: ExportRow[]): string {
-  const body = rows.map((r) => [
-    r.rowType,
-    r.date,
-    r.vendor,
-    r.itemName,
-    r.qty,
-    money(r.unitPrice),
-    money(r.lineTotal),
-    r.category,
-    r.paymentMethod,
-    r.currency,
-    money(r.receiptTotal),
-    money(r.receiptTax),
-    r.memo,
-    r.tags,
-    r.taxCategory,
-    r.isDeductible,
-    r.deductiblePercent,
-    money(r.deductibleAmount),
-    r.status,
-    r.receiptId,
-  ]);
-  return toCsv(ITEMIZED_HEADERS, body);
+/** Resolve a single column's cell value for an ExportRow (CSV-safe text). */
+function cellFor(row: ExportRow, id: ReportColumnId): string | number {
+  switch (id) {
+    case 'type': return row.rowType;
+    case 'date': return row.date;
+    case 'vendor': return row.vendor;
+    case 'item': return row.itemName;
+    case 'qty': return row.qty;
+    case 'unit_price': return money(row.unitPrice);
+    case 'line_total': return money(row.lineTotal);
+    case 'category': return row.category;
+    case 'payment_method': return row.paymentMethod;
+    case 'account': return row.account;
+    case 'currency': return row.currency;
+    case 'receipt_total': return money(row.receiptTotal);
+    case 'tax': return money(row.receiptTax);
+    case 'memo': return row.memo;
+    case 'tags': return row.tags;
+    case 'tax_category': return row.taxCategory;
+    case 'deductible': return row.isDeductible;
+    case 'deductible_percent': return row.deductiblePercent;
+    case 'deductible_amount': return money(row.deductibleAmount);
+    case 'status': return row.status;
+    case 'receipt_id': return row.receiptId;
+    default: return '';
+  }
+}
+
+/**
+ * Collapse per-line-item rows into ONE row per receipt for 'group' report mode.
+ * Mileage/cash rows are already one-per-entity, so they pass through. The first
+ * row of each receipt is kept (it carries the receipt-level fields, all repeated
+ * across its items), and its line-total is summed across included items so the
+ * group row's line_total reflects the whole receipt rather than a single item.
+ */
+function groupRows(rows: ExportRow[]): ExportRow[] {
+  const out: ExportRow[] = [];
+  const indexById = new Map<string, number>();
+  for (const r of rows) {
+    if (r.rowType !== 'Receipt') {
+      out.push(r);
+      continue;
+    }
+    const existing = indexById.get(r.receiptId);
+    if (existing === undefined) {
+      indexById.set(r.receiptId, out.length);
+      // Represent the whole receipt: item label becomes a count placeholder and
+      // the line-total starts at this row's own line total (summed below).
+      out.push({ ...r, itemName: '(all items)', qty: 1, unitPrice: r.receiptTotal, lineTotal: r.lineTotal });
+    } else {
+      const agg = out[existing];
+      agg.lineTotal = round2(agg.lineTotal + r.lineTotal);
+      agg.deductibleAmount = round2(agg.deductibleAmount + r.deductibleAmount);
+    }
+  }
+  return out;
+}
+
+/**
+ * Build the itemized CSV honoring the user's report config (TASK 16): the
+ * selected/ordered columns, the per-line-item vs per-receipt mode, and an
+ * optional free-text header line. Memo + tags remain available columns (the
+ * competitor fix) and are part of the default selection. When the config is
+ * absent/empty, normalizeReportConfig restores the full default column set, so
+ * the output matches the historical export.
+ */
+function itemizedCsv(rows: ExportRow[], config?: ReportConfig): string {
+  const cfg = normalizeReportConfig(config);
+  const columns = effectiveColumns(cfg);
+  const sourceRows = cfg.mode === 'group' ? groupRows(rows) : rows;
+
+  const headers = columns.map(columnHeader);
+  const body = sourceRows.map((r) => columns.map((id) => cellFor(r, id)));
+  const csv = toCsv(headers, body);
+
+  const header = cfg.header.trim();
+  // Prepend a single free-text header line above the table when set. It is its
+  // own CSV row (quoted if needed) so spreadsheet apps still parse the file.
+  return header ? `${toCsv([header], [])}\n${csv}` : csv;
 }
 
 // ---------------------------------------------------------------------------
