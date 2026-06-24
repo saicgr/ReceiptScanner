@@ -14,8 +14,9 @@
 //   POST /feature-requests       submit a private feature request (rate-limited)
 //
 // Auth: every endpoint that costs money or exposes user data requires a valid
-// X-Device-Id + X-Device-Token pair (see deviceAuth.js). No CORS middleware —
-// the only clients are native apps and the mail webhook, neither needs it.
+// X-Device-Id + X-Device-Token pair (see deviceAuth.js). CORS is enabled (see
+// the middleware below) so the Expo WEB build — a real browser origin — isn't
+// blocked; native apps and the mail webhook are unaffected.
 //
 // The server is stateless except in-memory rate counters and the short-lived
 // pending queue. No user receipts are persisted server-side.
@@ -49,6 +50,30 @@ import {
 const app = express();
 // Render terminates TLS at a proxy; trust one hop so req.ip is the client.
 app.set('trust proxy', 1);
+
+// CORS — native apps (the original clients) don't trigger CORS, but the Expo
+// WEB build is a browser origin and the browser blocks every cross-origin call
+// to this proxy without these headers. Auth is via a device TOKEN (header), not
+// cookies, so we never need credentialed CORS — a plain allowlist (default '*')
+// is safe. Also answers the preflight (OPTIONS) for the custom device headers.
+app.use((req, res, next) => {
+  const allow = config.corsAllowOrigins;
+  const origin = req.headers.origin;
+  if (allow === '*') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (origin && allow.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-Device-Id, X-Device-Token, X-Inbound-Secret',
+  );
+  res.setHeader('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 // Per-route body parsers — only the image-bearing routes get big limits.
 const jsonSmall = express.json({ limit: '50kb' }); // register / ack
@@ -124,9 +149,11 @@ app.get('/forwarding-address', requireDeviceAuth, (req, res) => {
 // refunds the scan when Gemini fails with a 5xx/timeout.
 // ---------------------------------------------------------------------------
 app.post('/extract', jsonImage, requireDeviceAuth, async (req, res) => {
+  const t0 = Date.now();
   // Validate the body first — a bad request must never burn a scan.
   const { ocrText, imageBase64, imageMimeType, preferredDateFormat, categoryHints } = req.body || {};
   if (!ocrText && !imageBase64) {
+    console.warn('[extract] 400 no input — neither ocrText nor imageBase64 sent (client likely failed to encode the image)');
     return res
       .status(400)
       .json({ error: 'bad_request', message: 'Provide ocrText and/or imageBase64.' });
@@ -152,6 +179,9 @@ app.post('/extract', jsonImage, requireDeviceAuth, async (req, res) => {
   if (cacheKey) {
     const hit = getCached(cacheKey);
     if (hit) {
+      console.log(
+        `[extract] cache-hit img=${Boolean(imageBase64)} ocr=${(ocrText || '').length} → "${hit.vendor || '∅'}" ${hit.total} in ${Date.now() - t0}ms`,
+      );
       return res.json({
         ...hit,
         _meta: { ...peek(req.deviceId), model: config.gemini.model, cached: true },
@@ -181,6 +211,9 @@ app.post('/extract', jsonImage, requireDeviceAuth, async (req, res) => {
       categoryHints: Array.isArray(categoryHints) ? categoryHints.slice(0, 40) : undefined,
     });
     if (cacheKey) setCached(cacheKey, result);
+    console.log(
+      `[extract] ok img=${Boolean(imageBase64)} ocr=${(ocrText || '').length} → "${result.vendor || '∅'}" ${result.total} ${result.currency} items=${result.line_items.length} in ${Date.now() - t0}ms`,
+    );
     res.json({
       ...result,
       _meta: {

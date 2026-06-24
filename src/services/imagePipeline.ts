@@ -27,6 +27,7 @@
  * a usable result (usually the original uri) instead of throwing, so a scan can
  * always proceed to OCR/extraction.
  */
+import { Platform } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -111,6 +112,31 @@ export async function pickFromGallery(opts?: { multiple?: boolean }): Promise<st
 
 /** Read a local file uri to a base64 string (used to encode in parallel with OCR). */
 export async function toBase64(uri: string): Promise<string> {
+  if (!uri) return '';
+  // Web: expo-file-system's readAsStringAsync can't read the browser's
+  // blob:/data:/http(s) image URIs, so it would return '' — meaning a web scan
+  // sends NO image to /extract and extraction comes back empty. Go through the
+  // browser instead: fetch the bytes and base64-encode them via FileReader.
+  if (Platform.OS === 'web') {
+    try {
+      const res = await fetch(uri);
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+        reader.onloadend = () => {
+          const out = typeof reader.result === 'string' ? reader.result : '';
+          // Strip the "data:<mime>;base64," prefix so the payload matches the
+          // raw-base64 shape the native path (and the server) expects.
+          const comma = out.indexOf(',');
+          resolve(comma >= 0 ? out.slice(comma + 1) : '');
+        };
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return '';
+    }
+  }
   try {
     return await FileSystem.readAsStringAsync(uri, {
       encoding: FileSystem.EncodingType.Base64,

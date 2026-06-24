@@ -72,6 +72,16 @@ export const config = {
     featureRequestsPerDay: parseInt(process.env.FEATURE_REQUESTS_PER_DAY || '10', 10),
   },
 
+  // CORS allowlist for browser (web build) origins. Native apps don't trigger
+  // CORS, but the Expo web build is a real browser origin and is blocked without
+  // it. Comma-separated origins, or '*' to allow any (default). Auth is via a
+  // device token, not cookies, so credentialed CORS is never needed.
+  corsAllowOrigins: (() => {
+    const raw = (process.env.CORS_ALLOW_ORIGINS || '*').trim();
+    if (raw === '*' || raw === '') return '*';
+    return raw.split(',').map((o) => o.trim()).filter(Boolean);
+  })(),
+
   // Supabase — durable storage for the Roadmap & Feature-Request feature (the
   // ONLY persistent storage). Optional: when unset, those endpoints degrade
   // (GET /roadmap returns curated items at zero votes; writes return 503).

@@ -367,6 +367,14 @@ export async function extractReceipt(args: {
   // If we have neither text nor an image, there's nothing to send — return an
   // empty, fully-editable draft rather than calling the backend for nothing.
   if (!ocrText.trim() && !imageBase64) {
+    if (__DEV__) {
+      console.warn(
+        '[extractClient] no OCR text AND no image base64 — skipping /extract and ' +
+          'returning an empty draft. The image likely failed to encode (e.g. ' +
+          'toBase64 returned "" for this uri). The "couldn\'t read much" screen ' +
+          'comes from here, not the server.',
+      );
+    }
     return localExtractFallback(ocrText);
   }
 
