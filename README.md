@@ -50,7 +50,7 @@ ReceiptSnap was designed by going through real user complaints about a popular c
 
 **Backend (`server/`)** — a deliberately thin proxy
 
-- **Node ≥ 18**, **Express 4**, **multer** (inbound-email attachments), **dotenv**, **@supabase/supabase-js** (roadmap votes / feature requests only — never receipts)
+- **Node ≥ 18**, **Express 4**, **multer** (inbound-email attachments), **dotenv**, **@neondatabase/serverless** (roadmap votes / feature requests only — never receipts)
 - Calls **Gemini Flash-Lite** (`gemini-3.1-flash-lite`) via the Google Generative Language REST API
 - **Device-token auth** on every money/data endpoint: `X-Device-Id` + `X-Device-Token` (= `HMAC-SHA256(deviceId, DEVICE_TOKEN_SECRET)`), minted at `POST /device/register`. No CORS (native clients + mail webhook only).
 - Endpoints: `/health`, `/device/register`, `/forwarding-address`, `/extract`, `/detect-receipts`, `/summarize`, `/inbound-email`, `/pending`(+`/ack`), `/roadmap`(+`/:id/vote`), `/feature-requests`, `/limits`.

@@ -82,19 +82,15 @@ export const config = {
     return raw.split(',').map((o) => o.trim()).filter(Boolean);
   })(),
 
-  // Supabase — durable storage for the Roadmap & Feature-Request feature (the
-  // ONLY persistent storage). Optional: when unset, those endpoints degrade
-  // (GET /roadmap returns curated items at zero votes; writes return 503).
+  // Neon (serverless Postgres) — durable storage for the Roadmap &
+  // Feature-Request feature (the ONLY persistent storage). Optional: when unset,
+  // those endpoints degrade (GET /roadmap returns curated items at zero votes;
+  // writes return 503).
   //
-  // Uses a SECRET (server-side) key, which bypasses RLS — server-only, never
-  // shipped. Supabase's modern key is `sb_secret_...` (SUPABASE_SECRET_KEY); the
-  // legacy `service_role` JWT is deprecated but still accepted as a fallback.
-  supabase: {
-    url: process.env.SUPABASE_URL || '',
-    secretKey:
-      process.env.SUPABASE_SECRET_KEY ||
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      '',
+  // The connection string embeds the password — server-only, never shipped in
+  // the app. Prefer Neon's POOLED connection string (`...-pooler...`).
+  neon: {
+    databaseUrl: process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '',
   },
 
   // Inbound email: shared secret so only your mail provider's webhook can post.

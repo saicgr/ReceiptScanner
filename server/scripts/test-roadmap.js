@@ -2,7 +2,7 @@
 //
 // Boots the Express app on an ephemeral port and exercises /roadmap,
 // /roadmap/:id/vote and /feature-requests. Adapts to whether durable storage
-// (Supabase) is configured: with env set it asserts the live insert/vote path;
+// (Neon) is configured: with env set it asserts the live insert/vote path;
 // without it, it asserts the graceful-degrade path (curated items at zero votes,
 // writes -> 503). Prints a PASS/FAIL summary and exits non-zero on failure.
 //
@@ -37,7 +37,7 @@ async function register(deviceId) {
 async function main() {
   const stored = isConfigured();
   console.log(`\nReceiptSnap roadmap route tests`);
-  console.log(`Supabase storage configured: ${stored}\n`);
+  console.log(`Neon storage configured: ${stored}\n`);
 
   await new Promise((resolve) => {
     server = app.listen(0, () => {

@@ -1,14 +1,14 @@
 // Curated product roadmap — the single source of truth the app reads via
 // GET /roadmap. These items are OURS (curated), not user-generated, so there's
 // nothing to moderate. The app merges them with live upvote counts + the
-// caller's own vote state from Supabase; offline it falls back to a bundled
+// caller's own vote state from Neon; offline it falls back to a bundled
 // copy (src/data/roadmap.ts) that should be kept loosely in sync with this.
 //
 // status: 'in_progress' | 'planned' | 'shipped'
 //   - 'shipped' items are non-votable (shown for credibility / "we ship").
 //   - 'in_progress' + 'planned' items accept one upvote per device.
 //
-// `id` is a STABLE slug — votes in Supabase are keyed on it, so never rename
+// `id` is a STABLE slug — votes in Neon are keyed on it, so never rename
 // an id (change the title freely instead). Bump UPDATED_AT when the list moves.
 
 export const UPDATED_AT = '2026-06-22';

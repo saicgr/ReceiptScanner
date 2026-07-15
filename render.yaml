@@ -37,10 +37,9 @@ services:
         generateValue: true
       - key: INBOUND_EMAIL_SECRET
         generateValue: true
-      # Roadmap & feature-request storage (optional). Create a Supabase project,
-      # run the migration in server/README.md, then paste these. Unset = the
-      # roadmap still shows (zero votes) but voting/submitting return 503.
-      - key: SUPABASE_URL
-        sync: false # paste in the Render dashboard
-      - key: SUPABASE_SECRET_KEY
-        sync: false # secret key (sb_secret_...) — bypasses RLS; server-only, never shipped
+      # Roadmap & feature-request storage (optional). Create a Neon project, run
+      # the migration in server/README.md, then paste the POOLED connection
+      # string. Unset = the roadmap still shows (zero votes) but voting/
+      # submitting return 503.
+      - key: DATABASE_URL
+        sync: false # Neon pooled connection string — server-only, never shipped

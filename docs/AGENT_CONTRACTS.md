@@ -31,7 +31,7 @@ This file pins the exact module APIs so independently-built files integrate. **F
 
 # BACKEND API CONTRACT (`server/`) — current truth
 
-Thin Express proxy (`server/src/index.js`). Stateless except in-memory rate counters, the bounded extraction LRU cache, and the ephemeral pending queue. **No user receipts are persisted server-side** (the ONLY durable store is Supabase, used solely for Roadmap votes + feature requests). No CORS middleware (native clients + mail webhook only).
+Thin Express proxy (`server/src/index.js`). Stateless except in-memory rate counters, the bounded extraction LRU cache, and the ephemeral pending queue. **No user receipts are persisted server-side** (the ONLY durable store is Neon Postgres, used solely for Roadmap votes + feature requests). No CORS middleware (native clients + mail webhook only).
 
 **Auth.** Every endpoint that costs money or exposes user data requires BOTH headers `X-Device-Id` + `X-Device-Token` (`requireDeviceAuth`), where `X-Device-Token = HMAC-SHA256(deviceId, DEVICE_TOKEN_SECRET)`. Verification is stateless. An invalid pair → `401`. Mint a token via `POST /device/register` (per-IP rate-limited). `/inbound-email` is gated by a separate shared secret, not device auth.
 
@@ -44,14 +44,14 @@ Thin Express proxy (`server/src/index.js`). Stateless except in-memory rate coun
 - `POST /summarize` (authed) `{ receipt }` → `{ summary }`. Billed Gemini call but NOT a "scan" (per-IP + global cap only; global refund on 5xx/timeout).
 - `POST /inbound-email` (shared-secret) — JSON or multipart (SendGrid Parse). Runs each attachment/body through the same pipeline into the pending queue; caps 3 attachments/email; draws on the global daily cap and **refunds the global slot when a Gemini call fails (TASK 37)**. In production an unset `INBOUND_EMAIL_SECRET` returns `503`.
 - `GET  /pending` (authed) → `{ token, items }`. `POST /pending/ack` (authed) `{ ids }` → `{ ok, removed }`.
-- `GET  /roadmap` (authed) → `{ updatedAt, items:[{...curated, upvotes, voted}] }`. Reads degrade to 0 votes when Supabase is down.
+- `GET  /roadmap` (authed) → `{ updatedAt, items:[{...curated, upvotes, voted}] }`. Reads degrade to 0 votes when Neon is down.
 - `POST /roadmap/:id/vote` (authed) → `{ id, voted, upvotes }`. Shipped items 400; storage down → 503.
 - `POST /feature-requests` (authed) `{ title, description?, category? }` → `{ ok, id }`. Per-device daily cap (`FEATURE_REQUESTS_PER_DAY`, default 10).
 - `GET  /limits` (authed) → `{ remainingToday, lifetimeRemaining }` (no consume).
 
 **Rate limits / billing circuit breaker** (`server/src/rateLimit.js`): per-device `RATE_LIMIT_PER_DAY` (default 50/day) + `RATE_LIMIT_LIFETIME` soft cap (default 5000); per-IP backstops on register/extract; a service-wide `GLOBAL_DAILY_GEMINI_CAP` (default 2000) across ALL Gemini routes. All counter maps are bounded (LRU eviction) to cap memory.
 
-**Env vars** (`server/src/config.js`): `PORT` (8787); `GEMINI_API_KEY` (required to actually extract), `GEMINI_MODEL` (gemini-3.1-flash-lite via env / default), `GEMINI_BASE_URL`; `DEVICE_TOKEN_SECRET` (**required in production — refuses to boot without it**); `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_LIFETIME`, `REGISTER_PER_DAY_PER_IP`, `EXTRACT_PER_DAY_PER_IP`, `GLOBAL_DAILY_GEMINI_CAP`, `FEATURE_REQUESTS_PER_DAY`; `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (optional — roadmap/feature-request storage; degrade gracefully when unset); `INBOUND_EMAIL_SECRET`, `FORWARDING_DOMAIN` (inbox.receiptsnap.app), `PENDING_TTL_MS`.
+**Env vars** (`server/src/config.js`): `PORT` (8787); `GEMINI_API_KEY` (required to actually extract), `GEMINI_MODEL` (gemini-3.1-flash-lite via env / default), `GEMINI_BASE_URL`; `DEVICE_TOKEN_SECRET` (**required in production — refuses to boot without it**); `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_LIFETIME`, `REGISTER_PER_DAY_PER_IP`, `EXTRACT_PER_DAY_PER_IP`, `GLOBAL_DAILY_GEMINI_CAP`, `FEATURE_REQUESTS_PER_DAY`; `DATABASE_URL` (optional — Neon roadmap/feature-request storage; degrades gracefully when unset); `INBOUND_EMAIL_SECRET`, `FORWARDING_DOMAIN` (inbox.receiptsnap.app), `PENDING_TTL_MS`.
 
 ---
 

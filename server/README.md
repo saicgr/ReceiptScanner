@@ -104,21 +104,21 @@ Authed. Deterministic per device. Returns:
 Authed. → `{ "remainingToday": 50, "lifetimeRemaining": 5000 }`.
 
 ### `GET /roadmap`  — curated roadmap + live votes
-Authed. → `{ "updatedAt": "2026-06-22", "items": [{ "id", "title", "description", "status", "category", "upvotes", "voted" }] }`. Items are curated in `src/roadmapData.js`; `upvotes`/`voted` come from Supabase. When Supabase is unconfigured/down the items still return with `upvotes: 0, voted: false`.
+Authed. → `{ "updatedAt": "2026-06-22", "items": [{ "id", "title", "description", "status", "category", "upvotes", "voted" }] }`. Items are curated in `src/roadmapData.js`; `upvotes`/`voted` come from Neon. When Neon is unconfigured/down the items still return with `upvotes: 0, voted: false`.
 
 ### `POST /roadmap/:id/vote`  — toggle an upvote
 Authed. Body: none. Toggles this device's vote on a votable (`planned`/`in_progress`) item. → `{ "id", "voted": true, "upvotes": 3 }`. `404` for an unknown id, `400` for a `shipped` item, `503` when storage is unavailable.
 
 ### `POST /feature-requests`  — submit a private request
-Authed. Body: `{ "title": "…", "description": "…", "category": "…"? }`. Stored privately in Supabase (not shown to other users). → `{ "ok": true, "id": "uuid" }`. `400` on validation (title 1–120, description ≤2000), `429` past `FEATURE_REQUESTS_PER_DAY`, `503` when storage is unavailable.
+Authed. Body: `{ "title": "…", "description": "…", "category": "…"? }`. Stored privately in Neon (not shown to other users). → `{ "ok": true, "id": "uuid" }`. `400` on validation (title 1–120, description ≤2000), `429` past `FEATURE_REQUESTS_PER_DAY`, `503` when storage is unavailable.
 
 ---
 
-## Roadmap & feature-request storage (Supabase — optional)
+## Roadmap & feature-request storage (Neon Postgres — optional)
 
-These three routes are the **only** persistent storage. They hold roadmap upvotes and private feature-request text — never receipts; devices are stored as a `sha256` hash. The feature degrades gracefully: without `SUPABASE_URL` + `SUPABASE_SECRET_KEY`, `GET /roadmap` still serves the curated list at zero votes and the write routes return `503`.
+These three routes are the **only** persistent storage. They hold roadmap upvotes and private feature-request text — never receipts; devices are stored as a `sha256` hash. The feature degrades gracefully: without `DATABASE_URL`, `GET /roadmap` still serves the curated list at zero votes and the write routes return `503`.
 
-To enable: create a [Supabase](https://supabase.com) project, run this in the SQL editor, then set the two env vars. Use a **secret key** — the modern `sb_secret_...` from *Project Settings → API keys → Secret keys* (the legacy `service_role` JWT also works via `SUPABASE_SERVICE_ROLE_KEY`). It bypasses RLS, so keep it server-only:
+To enable: create a [Neon](https://neon.tech) project, run this in the SQL editor, then set `DATABASE_URL` to the **pooled** connection string (*Connect* → the host containing `-pooler`). The connection string embeds the role password, so keep it server-only. Queries go over Neon's HTTP driver (`@neondatabase/serverless`) — no connection pool to tune, which suits a free-tier instance that sleeps.
 
 ```sql
 create table feature_requests (
@@ -140,9 +140,13 @@ create table roadmap_votes (
 );
 create index on roadmap_votes (item_id);
 
--- Lock out anon/public; the proxy's service-role key bypasses RLS.
+-- Defense in depth. The proxy connects as the table OWNER (neondb_owner), and an
+-- owner bypasses RLS — so this does not affect the server. What it does do is deny
+-- every OTHER role by default: if Neon's Data API (PostgREST) or Neon Auth is ever
+-- switched on, its anon/authenticated roles hit these tables with zero policies and
+-- get nothing. Without this, enabling the Data API would expose both tables wholesale.
 alter table feature_requests enable row level security;
-alter table roadmap_votes  enable row level security;
+alter table roadmap_votes    enable row level security;
 ```
 
 ---
@@ -164,8 +168,7 @@ Copy `.env.example` → `server/.env` (the loader also falls back to the repo-ro
 | `EXTRACT_PER_DAY_PER_IP` | no | `200` | Per-IP daily backstop shared by `/extract` + `/detect-receipts`. |
 | `GLOBAL_DAILY_GEMINI_CAP` | no | `2000` | Billing circuit breaker: total Gemini calls/day across ALL routes (429 once spent). |
 | `FEATURE_REQUESTS_PER_DAY` | no | `10` | Anti-spam cap on `/feature-requests` per device per day. |
-| `SUPABASE_URL` | no | _(empty = roadmap votes/submit disabled)_ | Supabase project URL for roadmap/feature-request storage. |
-| `SUPABASE_SECRET_KEY` | no | _(empty)_ | Supabase **secret** key (`sb_secret_...`, or legacy `SUPABASE_SERVICE_ROLE_KEY`). Bypasses RLS — server-only, never ship it. |
+| `DATABASE_URL` | no | _(empty = roadmap votes/submit disabled)_ | Neon **pooled** Postgres connection string for roadmap/feature-request storage. Embeds the password — server-only, never ship it. `NEON_DATABASE_URL` works as an alias. |
 | `INBOUND_EMAIL_SECRET` | **yes in production** | _(empty = open in dev, **503 in production**)_ | Shared secret the mail webhook must present (`X-Inbound-Secret` header preferred; `?secret=` only for providers that can't set headers). Generate with `openssl rand -hex 32`. |
 | `FORWARDING_DOMAIN` | no | `inbox.receiptsnap.app` | Domain in minted addresses: `user-<token>@<FORWARDING_DOMAIN>`. |
 | `PENDING_TTL_MS` | no | `259200000` (72 h) | How long un-acked email receipts live in the in-memory queue. |

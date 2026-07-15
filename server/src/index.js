@@ -398,7 +398,7 @@ app.post('/pending/ack', jsonSmall, requireDeviceAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Roadmap & feature requests (durable storage in Supabase; see featureStore.js)
+// Roadmap & feature requests (durable storage in Neon; see featureStore.js)
 //
 //   GET  /roadmap              curated items + live upvote counts + my votes
 //   POST /roadmap/:id/vote     toggle my upvote on a votable item
